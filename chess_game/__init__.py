@@ -1,0 +1,1 @@
+"""Desktop chess game package."""
