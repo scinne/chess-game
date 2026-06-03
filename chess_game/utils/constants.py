@@ -1,6 +1,13 @@
 """Application constants."""
 
-from PyQt6.QtGui import QColor
+try:
+    from PyQt6.QtGui import QColor
+except Exception:  # noqa: BLE001
+    class QColor:  # type: ignore[override]
+        """Fallback QColor for non-GUI environments."""
+
+        def __init__(self, *_args) -> None:
+            pass
 
 # Board
 BOARD_SIZE = 8

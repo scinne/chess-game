@@ -9,13 +9,7 @@ from pathlib import Path
 import chess
 import chess.engine
 
-DIFFICULTY_LEVELS = {
-    300: {'name': 'Easy', 'depth': 10, 'skill': 0},
-    500: {'name': 'Intermediate', 'depth': 15, 'skill': 5},
-    1000: {'name': 'Intermediate+', 'depth': 18, 'skill': 10},
-    1500: {'name': 'Advanced', 'depth': 22, 'skill': 15},
-    2000: {'name': 'Expert', 'depth': 25, 'skill': 20},
-}
+from chess_game.utils.constants import DIFFICULTY_LEVELS
 
 class StockfishNotFoundError(RuntimeError):
     """Raised when a Stockfish binary cannot be initialized."""
