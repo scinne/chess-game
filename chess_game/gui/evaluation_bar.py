@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPainter
+from PyQt6.QtGui import QPaintEvent, QPainter
 from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 
@@ -20,7 +20,7 @@ class EvaluationBar(QWidget):
         self._label.setText(f"{self._cp / 100:+.2f}")
         self.update()
 
-    def paintEvent(self, event) -> None:  # noqa: N802
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         painter = QPainter(self)
         ratio = max(0.0, min(1.0, 0.5 + (self._cp / 1600)))
         white_height = int(self.height() * ratio)

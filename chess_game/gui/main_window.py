@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import chess
 from PyQt6.QtCore import QObject, QRunnable, Qt, QThreadPool, pyqtSignal
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QCloseEvent
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -144,10 +144,13 @@ class MainWindow(QMainWindow):
             if self.game.push(move):
                 self._refresh()
                 self._check_game_end()
-                if self.enable_premove and self.premove and self.game.board.turn:
+                while self.enable_premove and self.premove and self.game.board.turn:
                     queued = self.premove
                     self.premove = None
-                    self._on_player_move(queued)
+                    if not self.game.push(queued):
+                        break
+                    self._refresh()
+                    self._check_game_end()
         elif self.enable_premove:
             self.premove = move
 
@@ -213,7 +216,7 @@ class MainWindow(QMainWindow):
             replay.push(move)
         self.board_widget.set_board(replay)
 
-    def closeEvent(self, event) -> None:  # noqa: N802
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         self.engine.close()
         super().closeEvent(event)
 

@@ -4,8 +4,8 @@ from dataclasses import dataclass
 
 import chess
 from PyQt6.QtCore import QPoint, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QMouseEvent, QPainter, QPen
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtGui import QColor, QMouseEvent, QPaintEvent, QPainter, QPen
+from PyQt6.QtWidgets import QInputDialog, QWidget
 
 from chess_game.utils.constants import (
     BOARD_SIZE,
@@ -41,6 +41,7 @@ class BoardWidget(QWidget):
         self._light_square = LIGHT_SQUARE
         self._dark_square = DARK_SQUARE
         self._piece_theme = "Unicode"
+        self._piece_color = Qt.GlobalColor.black
 
     def set_board(self, board: chess.Board) -> None:
         self.board = board.copy(stack=True)
@@ -63,7 +64,23 @@ class BoardWidget(QWidget):
 
     def set_piece_theme(self, theme: str) -> None:
         self._piece_theme = theme
+        self._piece_color = {
+            "Unicode": Qt.GlobalColor.black,
+            "Classic": Qt.GlobalColor.darkBlue,
+        }.get(theme, Qt.GlobalColor.black)
         self.update()
+
+    def _promotion_piece(self) -> chess.PieceType:
+        options = ["Queen", "Rook", "Bishop", "Knight"]
+        choice, ok = QInputDialog.getItem(self, "Pawn Promotion", "Promote to:", options, 0, False)
+        if not ok:
+            return chess.QUEEN
+        return {
+            "Queen": chess.QUEEN,
+            "Rook": chess.ROOK,
+            "Bishop": chess.BISHOP,
+            "Knight": chess.KNIGHT,
+        }[choice]
 
     def _square_size(self) -> int:
         return self.width() // 8
@@ -104,7 +121,7 @@ class BoardWidget(QWidget):
             if selected_piece is not None:
                 move = chess.Move(self.selected_square, square)
                 if selected_piece.piece_type == chess.PAWN and chess.square_rank(square) in {0, 7}:
-                    move = chess.Move(self.selected_square, square, promotion=chess.QUEEN)
+                    move = chess.Move(self.selected_square, square, promotion=self._promotion_piece())
                 if move in self.board.legal_moves:
                     self.move_played.emit(move)
                     self.selected_square = None
@@ -126,7 +143,7 @@ class BoardWidget(QWidget):
             self._arrow_start = None
             self.update()
 
-    def paintEvent(self, event) -> None:  # noqa: N802
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         painter = QPainter(self)
         size = self._square_size()
 
@@ -162,7 +179,7 @@ class BoardWidget(QWidget):
             if piece is None:
                 continue
             x, y = self._to_point(square)
-            painter.setPen(Qt.GlobalColor.black if self._piece_theme == "Unicode" else Qt.GlobalColor.darkBlue)
+            painter.setPen(self._piece_color)
             painter.drawText(x, y, size, size, Qt.AlignmentFlag.AlignCenter, PIECE_UNICODE[piece.symbol()])
 
         pen = QPen(QColor("#228BE6"), 6)
