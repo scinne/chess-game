@@ -181,8 +181,9 @@ class MainWindow(QMainWindow):
         self._refresh()
 
     def _on_redo(self) -> None:
-        self.game.redo()
-        self.game.redo()
+        first = self.game.redo()
+        if first is not None:
+            self.game.redo()
         self._refresh()
 
     def _on_save_pgn(self) -> None:

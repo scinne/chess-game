@@ -8,7 +8,7 @@ from typing import Iterable
 import chess
 import chess.engine
 
-from chess_game.utils.constants import DIFFICULTY_PRESETS
+from chess_game.utils.constants import DIFFICULTY_PRESETS, MATE_SCORE
 
 
 @dataclass(frozen=True)
@@ -76,7 +76,7 @@ class StockfishEngine:
         score = info.get("score")
         if score is None:
             return None
-        return score.white().score(mate_score=100000)
+        return score.white().score(mate_score=MATE_SCORE)
 
     def get_top_moves(self, board: chess.Board, lines: int = 3) -> list[EngineLine]:
         if not self._engine:
@@ -90,7 +90,7 @@ class StockfishEngine:
             score = entry.get("score")
             if not pv or score is None:
                 continue
-            top.append(EngineLine(move=pv[0], score_cp=score.white().score(mate_score=100000)))
+            top.append(EngineLine(move=pv[0], score_cp=score.white().score(mate_score=MATE_SCORE)))
         return top
 
     def close(self) -> None:

@@ -31,5 +31,4 @@ class MoveHistory(QListWidget):
 
     def _emit_selected(self, item) -> None:
         row = self.row(item)
-        ply = row
-        self.navigate_to_ply.emit(ply)
+        self.navigate_to_ply.emit(row)

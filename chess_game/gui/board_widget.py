@@ -100,13 +100,15 @@ class BoardWidget(QWidget):
 
         piece = self.board.piece_at(square)
         if self.selected_square is not None:
-            move = chess.Move(self.selected_square, square)
-            if self.board.piece_at(self.selected_square).piece_type == chess.PAWN and chess.square_rank(square) in {0, 7}:
-                move = chess.Move(self.selected_square, square, promotion=chess.QUEEN)
-            if move in self.board.legal_moves:
-                self.move_played.emit(move)
-                self.selected_square = None
-                return
+            selected_piece = self.board.piece_at(self.selected_square)
+            if selected_piece is not None:
+                move = chess.Move(self.selected_square, square)
+                if selected_piece.piece_type == chess.PAWN and chess.square_rank(square) in {0, 7}:
+                    move = chess.Move(self.selected_square, square, promotion=chess.QUEEN)
+                if move in self.board.legal_moves:
+                    self.move_played.emit(move)
+                    self.selected_square = None
+                    return
 
         if piece and piece.color == self.board.turn:
             self.selected_square = square
