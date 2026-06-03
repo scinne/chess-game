@@ -1,0 +1,13 @@
+QMainWindow {
+    background: #f4f4f4;
+}
+QDockWidget {
+    font-size: 13px;
+}
+QListWidget {
+    background: #ffffff;
+    border: 1px solid #cccccc;
+}
+QPushButton {
+    padding: 6px;
+}
