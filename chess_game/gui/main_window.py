@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+import logging
 import random
+import time
 from pathlib import Path
 
 import chess
@@ -42,7 +44,7 @@ from chess_game.gui.evaluation_bar import EvaluationBar
 from chess_game.gui.move_history import MoveHistory
 from chess_game.gui.review_binding import ReviewPanelBinding
 from chess_game.review.annotations import ReviewAnnotator
-from chess_game.review.coach import CoachBotService
+from chess_game.review.coach import BotPersonalityService, CoachService
 from chess_game.review.controller import AnalysisController
 from chess_game.review.engine_manager import StockfishAnalysisManager
 from chess_game.review.models import AnalysisResult, MoveAnnotation
@@ -53,6 +55,7 @@ from chess_game.review.opening import OpeningRepertoire
 from chess_game.review.overlays import BoardOverlayManager
 from chess_game.settings import SettingsManager
 
+LOGGER = logging.getLogger(__name__)
 
 BOT_PROFILES = (
     {'name': 'Nora Nook', 'elo': 250, 'group': 'Beginner', 'color': '#d99568', 'dialogue': 'I still hang queens, but I do it with confidence.'},
@@ -65,6 +68,48 @@ BOT_PROFILES = (
     {'name': 'Caden Knox', 'elo': 1600, 'group': 'Advanced', 'color': '#a36d90', 'dialogue': 'I like pressure, pins, and making you solve things.'},
     {'name': 'Serena Pike', 'elo': 2000, 'group': 'Master', 'color': '#789262', 'dialogue': 'Tiny weaknesses are still weaknesses.'},
     {'name': 'Victor Sage', 'elo': 2200, 'group': 'Master', 'color': '#607d9c', 'dialogue': 'I will not rush. That is usually the problem.'},
+)
+COACH_PROFILES = (
+    {
+        'name': 'Beginner Coach',
+        'elo': 400,
+        'group': 'Coach',
+        'color': '#6f9fd8',
+        'description': 'Gentle guidance on development, safety, and simple tactics.',
+        'dialogue': 'I will explain the ideas as we play.',
+    },
+    {
+        'name': 'Novice Coach',
+        'elo': 800,
+        'group': 'Coach',
+        'color': '#73aa6f',
+        'description': 'Practical help with opening plans and loose pieces.',
+        'dialogue': 'We will build habits one move at a time.',
+    },
+    {
+        'name': 'Intermediate Coach',
+        'elo': 1200,
+        'group': 'Coach',
+        'color': '#c39a4b',
+        'description': 'Teaches tactics, candidate moves, and positional tradeoffs.',
+        'dialogue': 'I will point out what changed after each move.',
+    },
+    {
+        'name': 'Advanced Coach',
+        'elo': 1600,
+        'group': 'Coach',
+        'color': '#9a7bc2',
+        'description': 'Sharper review of plans, weaknesses, and missed chances.',
+        'dialogue': 'Let us connect tactics to the position.',
+    },
+    {
+        'name': 'Expert Coach',
+        'elo': 2000,
+        'group': 'Coach',
+        'color': '#607d9c',
+        'description': 'Deeper explanations for engine choices and strategic themes.',
+        'dialogue': 'I will show why the engine move works.',
+    },
 )
 
 PIECE_VALUES = {
@@ -141,6 +186,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1080, 720)
         self.board = ChessBoard()
         self.bot_profile = BOT_PROFILES[0]
+        self.coach_profile = COACH_PROFILES[1]
         self.difficulty = int(self.bot_profile['elo'])
         self.game_mode = 'bot'
         self.player_side: chess.Color = chess.WHITE
@@ -161,15 +207,19 @@ class MainWindow(QMainWindow):
         self.variation_manager = VariationManager(self.move_tree)
         self.notation_renderer = NotationRenderer()
         self.overlay_manager = BoardOverlayManager()
-        self.coach_service = CoachBotService()
+        self.coach_service = CoachService()
+        self.bot_personality_service = BotPersonalityService()
         self.settings_manager = SettingsManager()
         self.selected_engine_line = None
         self.selected_review_node_id: str | None = None
         self.selected_variation_fen: str | None = None
+        self.selected_analysis_fen: str | None = None
         self.active_analysis: StockfishAnalysisManager | None = None
         self.analysis_controller: AnalysisController | None = None
         self.analysis_line_count = 3
         self.analysis_time_seconds = 0.15
+        self.deep_analysis_time_seconds = 0.8
+        self.analysis_depth = 14
         self.analysis_threads = 2
         self.cloud_stockfish_enabled = False
         self.cloud_target_depth = 41
@@ -179,6 +229,13 @@ class MainWindow(QMainWindow):
         self._game_over = False
         self._hint_stage = 0
         self._analysis_enabled = False
+        self._active_analysis_fen: str | None = None
+        self._shallow_analysis_timer = QTimer(self)
+        self._shallow_analysis_timer.setSingleShot(True)
+        self._deep_analysis_timer = QTimer(self)
+        self._deep_analysis_timer.setSingleShot(True)
+        self._ui_update_timer = QTimer(self)
+        self._ui_update_timer.setSingleShot(True)
 
         self.engine: StockfishEngine | None = None
         self.analysis_engine: StockfishEngine | None = None
@@ -214,11 +271,15 @@ class MainWindow(QMainWindow):
 
         self.start_page = self._build_start_page()
         self.new_game_page = self._build_new_game_page()
+        self.learn_page = self._build_learn_page()
+        self.coach_select_page = self._build_coach_select_page()
         self.bot_select_page = self._build_bot_select_page()
         self.game_page = self._build_game_page()
         self.review_page = self._build_review_page()
         self.stack.addWidget(self.start_page)
         self.stack.addWidget(self.new_game_page)
+        self.stack.addWidget(self.learn_page)
+        self.stack.addWidget(self.coach_select_page)
         self.stack.addWidget(self.bot_select_page)
         self.stack.addWidget(self.game_page)
         self.stack.addWidget(self.review_page)
@@ -226,6 +287,8 @@ class MainWindow(QMainWindow):
         self.eval_timer = QTimer(self)
         self.eval_timer.setInterval(250)
         self.eval_timer.timeout.connect(self._refresh_eval)
+        self._shallow_analysis_timer.timeout.connect(lambda: self._request_active_analysis(self.analysis_time_seconds))
+        self._deep_analysis_timer.timeout.connect(lambda: self._request_active_analysis(self.deep_analysis_time_seconds))
 
         style_path = Path(__file__).resolve().parents[1] / 'resources' / 'styles.qss'
         if style_path.exists():
@@ -235,14 +298,14 @@ class MainWindow(QMainWindow):
         page = QWidget()
         page.setObjectName('StartPage')
         layout = QHBoxLayout(page)
-        layout.setContentsMargins(42, 34, 42, 34)
+        layout.setContentsMargins(36, 30, 36, 30)
         layout.setSpacing(24)
 
         menu = QFrame()
         menu.setObjectName('MainMenuPanel')
         menu_layout = QVBoxLayout(menu)
-        menu_layout.setContentsMargins(28, 28, 28, 28)
-        menu_layout.setSpacing(12)
+        menu_layout.setContentsMargins(24, 24, 24, 24)
+        menu_layout.setSpacing(10)
         title = QLabel('Chess')
         title.setObjectName('MenuTitle')
         player = QLabel('Player')
@@ -251,35 +314,172 @@ class MainWindow(QMainWindow):
         menu_layout.addWidget(player)
         menu_layout.addSpacing(18)
 
-        self.quick_play_button = self._menu_button('Play 10 min', 'Last played time control')
-        self.new_game_button = self._menu_button('New Game', 'Choose friend or bot')
-        self.play_bots_button = self._menu_button('Play Bots', 'Pick an opponent')
-        self.play_friend_button = self._menu_button('Play a Friend', 'Local two-player board')
-        for button in (self.quick_play_button, self.new_game_button, self.play_bots_button, self.play_friend_button):
+        self.menu_play_tab = self._menu_button('Play', 'Quick start and opponents')
+        self.learn_button = self._menu_button('Learn', 'Coach, lessons, training')
+        self.analysis_menu_button = self._menu_button('Analysis', 'PGN and review tools')
+        self.settings_menu_button = self._menu_button('Settings', 'Board and engine options')
+        for button in (self.menu_play_tab, self.learn_button, self.analysis_menu_button, self.settings_menu_button):
+            button.setMinimumSize(260, 70)
             menu_layout.addWidget(button)
         menu_layout.addStretch(1)
 
-        tools = QFrame()
-        tools.setObjectName('StartSide')
-        tools_layout = QVBoxLayout(tools)
-        tools_layout.setContentsMargins(24, 24, 24, 24)
-        tools_layout.setSpacing(14)
-        tools_title = QLabel('Tools')
-        tools_title.setObjectName('PanelHeader')
-        self.upload_pgn_button = QPushButton('Upload PGN')
-        self.upload_pgn_button.setObjectName('StartAction')
-        self.review_from_menu_button = QPushButton('Game Review')
-        self.review_from_menu_button.setObjectName('StartAction')
+        context = QFrame()
+        context.setObjectName('StartSide')
+        context_layout = QVBoxLayout(context)
+        context_layout.setContentsMargins(24, 24, 24, 24)
+        context_layout.setSpacing(16)
+        self.start_context_title = QLabel('Play')
+        self.start_context_title.setObjectName('PanelHeader')
+        context_layout.addWidget(self.start_context_title)
+        self.start_context_stack = QStackedWidget()
+        context_layout.addWidget(self.start_context_stack, 1)
+
+        play_page = QWidget()
+        play_layout = QVBoxLayout(play_page)
+        play_layout.setContentsMargins(0, 0, 0, 0)
+        play_layout.setSpacing(12)
+        self.quick_play_button = self._context_card('Play 10 min', 'Start the last played time control.')
+        self.new_game_button = self._context_card('New Game', 'Choose friend or bot.')
+        self.play_bots_button = self._context_card('Play Bots', 'Pick an opponent and side.')
+        self.play_friend_button = self._context_card('Play a Friend', 'Local same-device game.')
+        for button in (self.quick_play_button, self.new_game_button, self.play_bots_button, self.play_friend_button):
+            play_layout.addWidget(button)
+        play_layout.addStretch(1)
+
+        learn_page = QWidget()
+        learn_layout = QVBoxLayout(learn_page)
+        learn_layout.setContentsMargins(0, 0, 0, 0)
+        learn_layout.setSpacing(12)
+        self.play_coach_home_button = self._context_card('Play Coach', 'Teaching opponent with guided comments.')
+        self.lessons_home_button = self._context_card('Lessons', 'Coming soon.')
+        self.training_home_button = self._context_card('Training', 'Coming soon.')
+        self.lessons_home_button.setEnabled(False)
+        self.training_home_button.setEnabled(False)
+        for button in (self.play_coach_home_button, self.lessons_home_button, self.training_home_button):
+            learn_layout.addWidget(button)
+        learn_layout.addStretch(1)
+
+        analysis_page = QWidget()
+        analysis_layout = QVBoxLayout(analysis_page)
+        analysis_layout.setContentsMargins(0, 0, 0, 0)
+        analysis_layout.setSpacing(12)
+        self.upload_pgn_button = self._context_card('Upload PGN', 'Import a game for analysis.')
+        self.review_from_menu_button = self._context_card('Review Finished Game', 'Open review for the latest finished game.')
+        self.free_analysis_button = self._context_card('Free Analysis Board', 'Coming soon.')
         self.review_from_menu_button.setVisible(False)
-        tools_layout.addWidget(tools_title)
-        tools_layout.addWidget(self.upload_pgn_button)
-        tools_layout.addWidget(self.review_from_menu_button)
-        tools_layout.addStretch(1)
+        self.free_analysis_button.setEnabled(False)
+        for button in (self.upload_pgn_button, self.review_from_menu_button, self.free_analysis_button):
+            analysis_layout.addWidget(button)
+        analysis_layout.addStretch(1)
+
+        settings_page = QWidget()
+        settings_layout = QVBoxLayout(settings_page)
+        settings_layout.setContentsMargins(0, 0, 0, 0)
+        settings_layout.setSpacing(12)
+        self.board_settings_button = self._context_card('Board Settings', 'Coordinates, overlays, and move hints.')
+        self.engine_settings_home_button = self._context_card('Engine Settings', 'Stockfish time, lines, and cloud toggle.')
+        self.sound_settings_button = self._context_card('Sound Settings', 'Coming soon.')
+        self.sound_settings_button.setEnabled(False)
+        for button in (self.board_settings_button, self.engine_settings_home_button, self.sound_settings_button):
+            settings_layout.addWidget(button)
+        settings_layout.addStretch(1)
+
+        for page_widget in (play_page, learn_page, analysis_page, settings_page):
+            self.start_context_stack.addWidget(page_widget)
+
+        layout.addWidget(menu, 0)
+        layout.addWidget(context, 1)
+        return page
+
+    def _context_card(self, title: str, subtitle: str) -> QPushButton:
+        button = QPushButton(f'{title}\n{subtitle}')
+        button.setObjectName('ContextCard')
+        button.setMinimumHeight(84)
+        return button
+
+    def _build_learn_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName('StartPage')
+        layout = QHBoxLayout(page)
+        layout.setContentsMargins(42, 34, 42, 34)
+        layout.setSpacing(24)
+
+        panel = QFrame()
+        panel.setObjectName('MainMenuPanel')
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(28, 28, 28, 28)
+        panel_layout.setSpacing(14)
+        title = QLabel('Learn')
+        title.setObjectName('MenuTitle')
+        panel_layout.addWidget(title)
+        self.play_coach_button = self._menu_button('Play Coach', 'Teaching opponent')
+        self.lessons_placeholder_button = self._menu_button('Lessons', 'Coming soon')
+        self.training_placeholder_button = self._menu_button('Training', 'Coming soon')
+        self.learn_back_button = QPushButton('Menu')
+        self.learn_back_button.setObjectName('GhostButton')
+        self.lessons_placeholder_button.setEnabled(False)
+        self.training_placeholder_button.setEnabled(False)
+        panel_layout.addWidget(self.play_coach_button)
+        panel_layout.addWidget(self.lessons_placeholder_button)
+        panel_layout.addWidget(self.training_placeholder_button)
+        panel_layout.addSpacing(8)
+        panel_layout.addWidget(self.learn_back_button)
+        panel_layout.addStretch(1)
 
         layout.addStretch(1)
-        layout.addWidget(menu, 0)
-        layout.addWidget(tools, 0)
+        layout.addWidget(panel)
         layout.addStretch(1)
+        return page
+
+    def _build_coach_select_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName('StartPage')
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(38, 28, 38, 32)
+        layout.setSpacing(14)
+
+        top = QHBoxLayout()
+        title = QLabel('Play Coach')
+        title.setObjectName('MenuTitle')
+        self.coach_select_back_button = QPushButton('Learn')
+        self.coach_select_back_button.setObjectName('GhostButton')
+        top.addWidget(self.coach_select_back_button)
+        top.addStretch(1)
+        top.addWidget(title)
+        top.addStretch(1)
+        layout.addLayout(top)
+
+        selected_panel = QFrame()
+        selected_panel.setObjectName('SelectedBotPanel')
+        selected_layout = QHBoxLayout(selected_panel)
+        selected_layout.setContentsMargins(16, 14, 16, 14)
+        selected_layout.setSpacing(14)
+        self.selected_coach_icon = QLabel()
+        self.selected_coach_name = QLabel('')
+        self.selected_coach_name.setObjectName('SelectedBotName')
+        self.selected_coach_dialogue = QLabel('')
+        self.selected_coach_dialogue.setObjectName('SelectedBotDialogue')
+        self.selected_coach_dialogue.setWordWrap(True)
+        selected_text = QVBoxLayout()
+        selected_text.setSpacing(4)
+        selected_text.addWidget(self.selected_coach_name)
+        selected_text.addWidget(self.selected_coach_dialogue)
+        self.coach_play_button = QPushButton('Play')
+        self.coach_play_button.setObjectName('StartAction')
+        selected_layout.addWidget(self.selected_coach_icon)
+        selected_layout.addLayout(selected_text, 1)
+        selected_layout.addWidget(self.coach_play_button)
+        layout.addWidget(selected_panel)
+
+        grid_panel = QFrame()
+        grid_panel.setObjectName('BotGroupPanel')
+        grid = QGridLayout(grid_panel)
+        grid.setContentsMargins(18, 16, 18, 18)
+        grid.setSpacing(12)
+        for index, coach in enumerate(COACH_PROFILES):
+            grid.addWidget(self._coach_card(coach), index // 3, index % 3)
+        layout.addWidget(grid_panel, 1)
+        self._select_coach(COACH_PROFILES[1])
         return page
 
     def _menu_button(self, title: str, subtitle: str) -> QPushButton:
@@ -434,6 +634,22 @@ class MainWindow(QMainWindow):
         self.selected_bot_name.setText(f"{bot['name']}  {bot['elo']} Elo")
         self.selected_bot_dialogue.setText(str(bot['dialogue']))
 
+    def _coach_card(self, coach: dict) -> QPushButton:
+        button = QPushButton(f"{coach['name']}  {coach['elo']}\n{coach['description']}")
+        button.setObjectName('BotCardButton')
+        avatar = self._bot_avatar(coach)
+        button.setIcon(QIcon(avatar))
+        button.setIconSize(avatar.size())
+        button.setMinimumSize(260, 112)
+        button.clicked.connect(lambda _checked=False, value=coach: self._select_coach(value))
+        return button
+
+    def _select_coach(self, coach: dict) -> None:
+        self.coach_profile = coach
+        self.selected_coach_icon.setPixmap(self._bot_avatar(coach))
+        self.selected_coach_name.setText(f"{coach['name']}  {coach['elo']} Elo")
+        self.selected_coach_dialogue.setText(str(coach['description']))
+
     def _bot_avatar(self, bot: dict) -> QPixmap:
         pixmap = QPixmap(56, 56)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -575,7 +791,7 @@ class MainWindow(QMainWindow):
         self.review_settings_button.setObjectName('ReviewTopButton')
         self.review_cloud_button = QPushButton('Cloud Off')
         self.review_cloud_button.setObjectName('ReviewTopButton')
-        self.review_toggle_button = QPushButton('Minimized')
+        self.review_toggle_button = QPushButton('Summary')
         self.review_toggle_button.setObjectName('ReviewTopButton')
         control_row.addWidget(self.review_menu_button)
         control_row.addStretch(1)
@@ -614,12 +830,16 @@ class MainWindow(QMainWindow):
         board_layout.addWidget(review_board_row, 1)
         board_layout.addWidget(self.review_player_strip)
 
-        right = QWidget()
-        right.setObjectName('ReviewSide')
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(12)
+        self.review_side_stack = QStackedWidget()
+        self.review_side_stack.setObjectName('ReviewSide')
 
+        summary_page = QWidget()
+        summary_layout = QVBoxLayout(summary_page)
+        summary_layout.setContentsMargins(0, 0, 0, 0)
+        summary_layout.setSpacing(14)
+        summary_title = QLabel('Game Review')
+        summary_title.setObjectName('PanelHeader')
+        summary_layout.addWidget(summary_title)
         review_cards = QHBoxLayout()
         review_cards.setSpacing(10)
         self.review_player_card = self._review_stat_card('Player', '0.0', 'Accuracy')
@@ -628,6 +848,7 @@ class MainWindow(QMainWindow):
         review_cards.addWidget(self.review_player_card)
         review_cards.addWidget(self.review_bot_card)
         review_cards.addWidget(self.review_rating_card)
+        summary_layout.addLayout(review_cards)
 
         self.review_summary_table = QTableWidget(0, 4)
         self.review_summary_table.setObjectName('ReviewSummaryTable')
@@ -639,27 +860,46 @@ class MainWindow(QMainWindow):
         self.review_summary_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for column in range(1, 4):
             self.review_summary_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        summary_layout.addWidget(self.review_summary_table, 1)
+        self.review_opening_summary = QLabel('Opening: Starting position')
+        self.review_opening_summary.setObjectName('OpeningLabel')
+        self.review_opening_summary.setWordWrap(True)
+        self.review_start_button = QPushButton('Start Review')
+        self.review_start_button.setObjectName('StartAction')
+        summary_layout.addWidget(self.review_opening_summary)
+        summary_layout.addWidget(self.review_start_button)
 
-        self.review_moves_table = QTableWidget(0, 4)
-        self.review_moves_table.setObjectName('ReviewMovesTable')
-        self.review_moves_table.setHorizontalHeaderLabels(['#', 'White', 'Black', 'Eval'])
-        self.review_moves_table.verticalHeader().setVisible(False)
-        self.review_moves_table.setAlternatingRowColors(True)
-        self.review_moves_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.review_moves_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.review_moves_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.review_moves_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.review_moves_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.review_moves_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.review_moves_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        move_page = QWidget()
+        right_layout = QVBoxLayout(move_page)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(12)
+
+        coach_card = QFrame()
+        coach_card.setObjectName('ReviewCoachPanel')
+        coach_layout = QHBoxLayout(coach_card)
+        coach_layout.setContentsMargins(14, 14, 14, 14)
+        coach_layout.setSpacing(12)
+        self.review_coach_avatar = QLabel()
+        self.review_coach_avatar.setPixmap(self._bot_avatar(self.bot_profile))
+        coach_text = QVBoxLayout()
+        coach_text.setSpacing(6)
+        self.review_move_header = QLabel('Select a move')
+        self.review_move_header.setObjectName('SelectedBotName')
+        self.review_coach_label = QLabel('Select a move and I will look at it with Stockfish.')
+        self.review_coach_label.setObjectName('CoachComment')
+        self.review_coach_label.setWordWrap(True)
+        coach_text.addWidget(self.review_move_header)
+        coach_text.addWidget(self.review_coach_label)
+        coach_layout.addWidget(self.review_coach_avatar)
+        coach_layout.addLayout(coach_text, 1)
+        right_layout.addWidget(coach_card)
 
         self.review_analysis_box = QTextEdit()
         self.review_analysis_box.setObjectName('AnalysisBox')
         self.review_analysis_box.setReadOnly(True)
-        self.review_analysis_box.setMaximumHeight(150)
-        self.review_coach_label = QLabel('Select a move and I will look at it with Stockfish.')
-        self.review_coach_label.setObjectName('CoachComment')
-        self.review_coach_label.setWordWrap(True)
+        self.review_analysis_box.setMaximumHeight(130)
+        self.review_analysis_box.hide()
+
         self.review_lines_table = QTableWidget(0, 3)
         self.review_lines_table.setObjectName('ReviewLinesTable')
         self.review_lines_table.setHorizontalHeaderLabels(['Eval', 'Best', 'Line'])
@@ -670,7 +910,21 @@ class MainWindow(QMainWindow):
         self.review_lines_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.review_lines_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.review_lines_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.review_lines_table.setMaximumHeight(150)
+        self.review_lines_table.setMaximumHeight(130)
+        right_layout.addWidget(self.review_lines_table)
+
+        self.review_moves_table = QTableWidget(0, 4)
+        self.review_moves_table.setObjectName('ReviewMovesTable')
+        self.review_moves_table.setHorizontalHeaderLabels(['#', 'White', 'Black', 'Result'])
+        self.review_moves_table.verticalHeader().setVisible(False)
+        self.review_moves_table.setAlternatingRowColors(True)
+        self.review_moves_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.review_moves_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.review_moves_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.review_moves_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.review_moves_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.review_moves_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.review_moves_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.review_box = QTextEdit()
         self.review_box.setObjectName('ReviewBox')
         self.review_box.setReadOnly(True)
@@ -683,13 +937,8 @@ class MainWindow(QMainWindow):
         line_actions.setSpacing(10)
         line_actions.addWidget(self.review_add_line_button)
         line_actions.addWidget(self.review_promote_button)
-        right_layout.addLayout(review_cards)
-        right_layout.addWidget(self.review_analysis_box)
-        right_layout.addWidget(self.review_coach_label)
-        right_layout.addWidget(self.review_lines_table)
-        right_layout.addLayout(line_actions)
-        right_layout.addWidget(self.review_summary_table, 3)
         right_layout.addWidget(self.review_moves_table, 4)
+        right_layout.addLayout(line_actions)
 
         review_nav = QHBoxLayout()
         review_nav.setSpacing(10)
@@ -701,9 +950,11 @@ class MainWindow(QMainWindow):
             button.setObjectName('ReviewNavButton')
             review_nav.addWidget(button)
         right_layout.addLayout(review_nav)
+        self.review_side_stack.addWidget(summary_page)
+        self.review_side_stack.addWidget(move_page)
 
         content.addWidget(board_panel)
-        content.addWidget(right)
+        content.addWidget(self.review_side_stack)
         content.setSizes([760, 560])
 
         layout.addLayout(control_row)
@@ -765,13 +1016,26 @@ class MainWindow(QMainWindow):
         menu.hide()
 
     def _connect_signals(self) -> None:
+        self.menu_play_tab.clicked.connect(lambda: self._show_start_context(0, 'Play'))
+        self.learn_button.clicked.connect(lambda: self._show_start_context(1, 'Learn'))
+        self.analysis_menu_button.clicked.connect(lambda: self._show_start_context(2, 'Analysis'))
+        self.settings_menu_button.clicked.connect(lambda: self._show_start_context(3, 'Settings'))
         self.quick_play_button.clicked.connect(self._start_friend_game)
         self.new_game_button.clicked.connect(lambda: self.stack.setCurrentWidget(self.new_game_page))
         self.play_bots_button.clicked.connect(lambda: self.stack.setCurrentWidget(self.bot_select_page))
         self.play_friend_button.clicked.connect(self._start_friend_game)
+        self.play_coach_home_button.clicked.connect(lambda: self.stack.setCurrentWidget(self.coach_select_page))
+        self.board_settings_button.clicked.connect(self._show_stockfish_settings)
+        self.engine_settings_home_button.clicked.connect(self._show_stockfish_settings)
         self.new_friend_button.clicked.connect(self._start_friend_game)
         self.new_bots_button.clicked.connect(lambda: self.stack.setCurrentWidget(self.bot_select_page))
         self.new_back_button.clicked.connect(self._show_start_menu)
+        self.play_coach_button.clicked.connect(lambda: self.stack.setCurrentWidget(self.coach_select_page))
+        self.lessons_placeholder_button.clicked.connect(lambda: self._update_status('Lessons placeholder is ready for future expansion'))
+        self.training_placeholder_button.clicked.connect(lambda: self._update_status('Training placeholder is ready for future expansion'))
+        self.learn_back_button.clicked.connect(self._show_start_menu)
+        self.coach_select_back_button.clicked.connect(lambda: self.stack.setCurrentWidget(self.learn_page))
+        self.coach_play_button.clicked.connect(lambda: self._start_coach_game(self.coach_profile))
         self.bot_select_back_button.clicked.connect(self._show_start_menu)
         self.bot_play_button.clicked.connect(lambda: self._start_bot_game(self.selected_bot_profile))
         self.side_white_button.clicked.connect(lambda: self._select_side('white'))
@@ -793,6 +1057,7 @@ class MainWindow(QMainWindow):
         self.review_settings_button.clicked.connect(self._show_stockfish_settings)
         self.review_cloud_button.clicked.connect(self._toggle_cloud_analysis)
         self.review_toggle_button.clicked.connect(self._toggle_review_mode)
+        self.review_start_button.clicked.connect(self._start_move_review)
         self.review_add_line_button.clicked.connect(self._add_selected_engine_line)
         self.review_promote_button.clicked.connect(self._promote_selected_variation)
         self.review_moves_table.cellClicked.connect(self._on_review_move_clicked)
@@ -805,6 +1070,10 @@ class MainWindow(QMainWindow):
 
     def _show_start_menu(self) -> None:
         self.stack.setCurrentWidget(self.start_page)
+
+    def _show_start_context(self, index: int, title: str) -> None:
+        self.start_context_stack.setCurrentIndex(index)
+        self.start_context_title.setText(title)
 
     def _show_stockfish_settings(self) -> None:
         dialog = QDialog(self)
@@ -843,10 +1112,6 @@ class MainWindow(QMainWindow):
         self.settings_overlays_check.setChecked(self.settings_manager.settings.show_board_overlays)
         layout.addWidget(self.settings_overlays_check)
 
-        self.settings_coach_check = QCheckBox('Show coach comments')
-        self.settings_coach_check.setChecked(self.settings_manager.settings.show_coach_comments)
-        layout.addWidget(self.settings_coach_check)
-
         self.settings_premove_check = QCheckBox('Enable premove')
         self.settings_premove_check.setChecked(self.enable_premove)
         layout.addWidget(self.settings_premove_check)
@@ -858,6 +1123,10 @@ class MainWindow(QMainWindow):
         self.settings_coordinates_check = QCheckBox('Show board coordinates')
         self.settings_coordinates_check.setChecked(self.settings_manager.settings.show_coordinates)
         layout.addWidget(self.settings_coordinates_check)
+
+        self.settings_debug_review_check = QCheckBox('Log review accuracy debug data')
+        self.settings_debug_review_check.setChecked(self.settings_manager.settings.debug_review_logging)
+        layout.addWidget(self.settings_debug_review_check)
 
         line_row = QHBoxLayout()
         line_label = QLabel('Number of lines')
@@ -877,6 +1146,25 @@ class MainWindow(QMainWindow):
         time_row.addWidget(time_label)
         time_row.addWidget(self.settings_time)
         layout.addLayout(time_row)
+
+        deep_time_row = QHBoxLayout()
+        deep_time_label = QLabel('Paused analysis time')
+        self.settings_deep_time = QComboBox()
+        for seconds in (0.5, 0.8, 1, 2, 5):
+            self.settings_deep_time.addItem(f'{seconds} sec', seconds)
+        self.settings_deep_time.setCurrentIndex(max(0, self.settings_deep_time.findData(self.deep_analysis_time_seconds)))
+        deep_time_row.addWidget(deep_time_label)
+        deep_time_row.addWidget(self.settings_deep_time)
+        layout.addLayout(deep_time_row)
+
+        depth_row = QHBoxLayout()
+        depth_label = QLabel('Analysis depth')
+        self.settings_depth = QSpinBox()
+        self.settings_depth.setRange(1, 30)
+        self.settings_depth.setValue(self.analysis_depth)
+        depth_row.addWidget(depth_label)
+        depth_row.addWidget(self.settings_depth)
+        layout.addLayout(depth_row)
 
         thread_row = QHBoxLayout()
         thread_label = QLabel('Threads')
@@ -916,6 +1204,8 @@ class MainWindow(QMainWindow):
         self.review_cloud_button.setText('Cloud On' if self.cloud_stockfish_enabled else 'Cloud Off')
         self.analysis_line_count = int(self.settings_lines.value())
         self.analysis_time_seconds = float(self.settings_time.currentData())
+        self.deep_analysis_time_seconds = float(self.settings_deep_time.currentData())
+        self.analysis_depth = int(self.settings_depth.value())
         self.analysis_threads = int(self.settings_threads.value())
         self.cloud_target_depth = int(self.settings_cloud_depth.currentData())
         self.enable_premove = self.settings_premove_check.isChecked()
@@ -923,17 +1213,22 @@ class MainWindow(QMainWindow):
             show_eval_bar=self.settings_eval_check.isChecked(),
             enable_stockfish_analysis=self.settings_analysis_check.isChecked(),
             analysis_time_seconds=self.analysis_time_seconds,
+            deep_analysis_time_seconds=self.deep_analysis_time_seconds,
             analysis_lines=self.analysis_line_count,
+            analysis_depth=self.analysis_depth,
             analysis_threads=self.analysis_threads,
             cloud_analysis=self.cloud_stockfish_enabled,
             show_move_quality_icons=self.settings_quality_check.isChecked(),
             show_board_overlays=self.settings_overlays_check.isChecked(),
-            show_coach_comments=self.settings_coach_check.isChecked(),
             enable_premove=self.enable_premove,
             show_legal_moves=self.settings_legal_check.isChecked(),
             show_coordinates=self.settings_coordinates_check.isChecked(),
+            debug_review_logging=self.settings_debug_review_check.isChecked(),
         )
         self._apply_runtime_settings()
+        if self.analysis_controller:
+            self.analysis_controller.clear_cache()
+        self._rerun_selected_analysis()
         self._update_status('Cloud Stockfish enabled; local fallback ready' if self.cloud_stockfish_enabled else 'Local Stockfish analysis ready')
         dialog.accept()
 
@@ -943,7 +1238,7 @@ class MainWindow(QMainWindow):
         self.review_cloud_button.setText('Cloud On' if self.cloud_stockfish_enabled else 'Cloud Off')
         self._update_status('Cloud analysis enabled; local fallback ready' if self.cloud_stockfish_enabled else 'Local Stockfish analysis ready')
         if self.stack.currentWidget() == self.review_page and self.review_rows:
-            self._show_review_position(self.review_rows[self.review_index])
+            self._rerun_selected_analysis()
 
     def _apply_runtime_settings(self) -> None:
         settings = self.settings_manager.settings
@@ -957,7 +1252,7 @@ class MainWindow(QMainWindow):
         self.review_board_widget.set_show_move_quality_icons(settings.show_move_quality_icons)
         self.board_widget.set_show_coordinates(settings.show_coordinates)
         self.review_board_widget.set_show_coordinates(settings.show_coordinates)
-        self.review_coach_label.setVisible(settings.show_coach_comments)
+        self.review_coach_label.setVisible(True)
 
     def _select_side(self, side: str) -> None:
         self.pending_side_choice = side
@@ -989,6 +1284,18 @@ class MainWindow(QMainWindow):
         if self.player_side == chess.BLACK:
             QTimer.singleShot(250, self._start_ai_turn)
 
+    def _start_coach_game(self, coach: dict) -> None:
+        self.game_mode = 'coach'
+        self.coach_profile = coach
+        self.bot_profile = coach
+        self.difficulty = int(coach['elo'])
+        self.player_side = chess.WHITE
+        self._apply_bot_profile()
+        self._analysis_enabled = True
+        self._new_game()
+        self.analysis_box.setPlainText(str(coach.get('dialogue', 'I will explain the ideas as we play.')))
+        self.stack.setCurrentWidget(self.game_page)
+
     def _start_friend_game(self) -> None:
         self.game_mode = 'local'
         self.player_side = chess.WHITE
@@ -1007,7 +1314,12 @@ class MainWindow(QMainWindow):
         self.review_bot_name_label.setText(name)
         self.review_bot_rating_label.setText(rating)
         self.review_bot_card.findChild(QLabel, 'ReviewCardTitle').setText(name)
-        self.panel_title.setText('Play a Friend' if self.game_mode == 'local' else f'Play {name}')
+        if self.game_mode == 'local':
+            self.panel_title.setText('Play a Friend')
+        elif self.game_mode == 'coach':
+            self.panel_title.setText(f'Play Coach: {name}')
+        else:
+            self.panel_title.setText(f'Play {name}')
 
     def _on_position_selected(self, fen: str) -> None:
         if self.stack.currentWidget() == self.review_page:
@@ -1028,7 +1340,7 @@ class MainWindow(QMainWindow):
             return
 
         move = chess.Move.from_uci(move_uci)
-        if self.game_mode == 'bot' and self.board.turn != self.player_side:
+        if self.game_mode in {'bot', 'coach'} and self.board.turn != self.player_side:
             if self._thinking and self.enable_premove and self._move_starts_player_piece(move):
                 self.pending_premove = move
                 self.board_widget.set_premove(move)
@@ -1055,7 +1367,7 @@ class MainWindow(QMainWindow):
             self._finish_game_status()
             return
 
-        if self.game_mode == 'bot':
+        if self.game_mode in {'bot', 'coach'}:
             self._start_ai_turn()
         else:
             self._update_status('Check' if self.board.is_check() else ('Black to move' if self.board.turn == chess.BLACK else 'White to move'))
@@ -1065,7 +1377,7 @@ class MainWindow(QMainWindow):
         return piece is not None and piece.color == self.player_side
 
     def _start_ai_turn(self) -> None:
-        if self.game_mode != 'bot':
+        if self.game_mode not in {'bot', 'coach'}:
             return
         if self.engine is None:
             self._update_status('Stockfish unavailable')
@@ -1099,7 +1411,7 @@ class MainWindow(QMainWindow):
             self.board_widget.set_last_move(move)
             self._sync_board_state()
 
-        self._refresh_eval()
+        self._schedule_active_analysis()
 
         if self.board.is_checkmate() or self.board.is_stalemate():
             self._finish_game_status()
@@ -1154,16 +1466,38 @@ class MainWindow(QMainWindow):
         bot_side = not self.player_side
         self.eval_bar.set_result('1-0' if bot_side == chess.WHITE else '0-1')
         self._update_status(message)
-        self._show_game_over('You Resigned', message)
+        self._show_game_over('You Lost', message, reason='Resignation')
 
     def _refresh_eval(self) -> None:
-        if not self.analysis_engine or self._game_over or not self.settings_manager.settings.enable_stockfish_analysis:
+        if self.settings_manager.settings.show_eval_bar:
+            self.eval_bar.set_evaluation(self._material_eval(self.board))
+
+    def _schedule_active_analysis(self, shallow_delay: int = 80) -> None:
+        if (
+            not self.active_analysis
+            or self._game_over
+            or self.stack.currentWidget() != self.review_page
+            or not self.settings_manager.settings.enable_stockfish_analysis
+        ):
             return
-        try:
-            evaluation = self.analysis_engine.get_evaluation(self.board, self.difficulty)
-            self.eval_bar.set_evaluation(evaluation)
-        except Exception:  # noqa: BLE001
-            pass
+        fen = self.board.fen()
+        if fen == self._active_analysis_fen:
+            return
+        self._active_analysis_fen = fen
+        self._shallow_analysis_timer.start(shallow_delay)
+        self._deep_analysis_timer.start(650)
+
+    def _request_active_analysis(self, time_seconds: float) -> None:
+        if not self.active_analysis or not self.settings_manager.settings.enable_stockfish_analysis:
+            return
+        if self.stack.currentWidget() != self.game_page or not self._active_analysis_fen:
+            return
+        self.active_analysis.analyze(
+            self._active_analysis_fen,
+            lines=self.analysis_line_count,
+            time_seconds=time_seconds,
+            threads=self.analysis_threads,
+        )
 
     def _top_moves_for_board(self, board: chess.Board, n: int = 3, analysis_time: float | None = None) -> list[dict]:
         if not self.analysis_engine or not self.settings_manager.settings.enable_stockfish_analysis:
@@ -1209,6 +1543,7 @@ class MainWindow(QMainWindow):
         return ' '.join(san_moves) or '-'
 
     def _sync_board_state(self) -> None:
+        start = time.perf_counter()
         self.board_widget.set_board(self.board)
         self.move_history.update_from_board(self.board)
         self._update_material_display()
@@ -1217,6 +1552,8 @@ class MainWindow(QMainWindow):
             self.opening_label.setText(f"Opening: {opening.get('name', 'Game in progress')}")
         else:
             self.opening_label.setText('Opening: Starting position')
+        self._schedule_active_analysis()
+        LOGGER.info('Board redraw cost %.1f ms', (time.perf_counter() - start) * 1000)
 
     def _captured_by(self, capturer_color: chess.Color) -> tuple[str, int]:
         opponent = not capturer_color
@@ -1253,16 +1590,72 @@ class MainWindow(QMainWindow):
             message = f'Checkmate - {winner} wins'
             self.eval_bar.set_result(result)
             self._update_status(message)
-            self._show_game_over(title, message)
+            self._show_game_over(title, message, reason='Checkmate')
         elif self.board.is_stalemate():
             self.eval_bar.set_result('1/2')
             self._update_status('Stalemate')
-            self._show_game_over('Draw', 'Stalemate. Neither side can make a legal move.')
+            self._show_game_over('Draw', 'Stalemate. Neither side can make a legal move.', reason='Stalemate')
 
-    def _show_game_over(self, title: str, detail: str) -> None:
-        QMessageBox.information(self, title, f'{detail}\n\nUse Review or Return to Menu when ready.')
+    def _show_game_over(self, title: str, detail: str, reason: str | None = None) -> None:
+        self._review_game(allow_live=False)
+        dialog = QDialog(self)
+        dialog.setWindowTitle('Game Over')
+        dialog.setObjectName('GameOverDialog')
+        dialog.setModal(False)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(24, 22, 24, 24)
+        layout.setSpacing(14)
 
-    def _review_game(self) -> None:
+        top = QHBoxLayout()
+        avatar = QLabel()
+        avatar.setPixmap(self._bot_avatar(self.bot_profile))
+        title_box = QVBoxLayout()
+        title_label = QLabel(title)
+        title_label.setObjectName('GameOverTitle')
+        reason_label = QLabel(reason or detail)
+        reason_label.setObjectName('GameOverDetail')
+        title_box.addWidget(title_label)
+        title_box.addWidget(reason_label)
+        top.addWidget(avatar)
+        top.addLayout(title_box, 1)
+        layout.addLayout(top)
+
+        dialogue = QLabel(self._game_result_dialogue(title, reason or detail))
+        dialogue.setObjectName('CoachComment')
+        dialogue.setWordWrap(True)
+        layout.addWidget(dialogue)
+
+        counts = self._game_review_counts()
+        summary = QLabel(
+            '  '.join(
+                f"{label} {counts.get(label.lower(), 0)}"
+                for label in ('Best', 'Excellent', 'Great', 'Good', 'Inaccuracy', 'Mistake', 'Blunder')
+            )
+        )
+        summary.setObjectName('GameOverDetail')
+        summary.setWordWrap(True)
+        layout.addWidget(summary)
+
+        game_review = QPushButton('Game Review')
+        game_review.setObjectName('StartAction')
+        actions = QHBoxLayout()
+        rematch = QPushButton('Rematch')
+        rematch.setObjectName('GhostButton')
+        menu = QPushButton('Menu')
+        menu.setObjectName('GhostButton')
+        actions.addWidget(rematch)
+        actions.addWidget(menu)
+        layout.addWidget(game_review)
+        layout.addLayout(actions)
+
+        game_review.clicked.connect(dialog.close)
+        rematch.clicked.connect(lambda: self._rematch_from_modal(dialog))
+        menu.clicked.connect(lambda: self._menu_from_modal(dialog))
+        dialog.show()
+
+    def _review_game(self, _checked: bool = False, *, allow_live: bool = True) -> None:
+        if not self._game_over and not allow_live:
+            return
         if not self._game_over:
             self._update_status('Review unlocks after the game ends')
             return
@@ -1286,15 +1679,62 @@ class MainWindow(QMainWindow):
         self.selected_variation_fen = None
         self.review_cloud_button.setText('Cloud On' if self.cloud_stockfish_enabled else 'Cloud Off')
         self.stack.setCurrentWidget(self.review_page)
+        self.review_side_stack.setCurrentIndex(0)
+        self.review_toggle_button.setText('Review')
         self._refresh_review_tables()
         self._jump_review_move(len(self.review_rows) - 1)
+        if self.analysis_controller and self.settings_manager.settings.enable_stockfish_analysis:
+            self.selected_variation_fen = self.board.fen()
+            self.analysis_controller.analyze_selected(
+                self.board.fen(),
+                lines=self.analysis_line_count,
+                time_seconds=self.deep_analysis_time_seconds,
+                threads=self.analysis_threads,
+            )
+
+    def _game_review_counts(self) -> dict:
+        if not self.review_annotations:
+            return {}
+        counts = {key: 0 for key in REVIEW_CATEGORIES_FULL}
+        for annotation in self.review_annotations.values():
+            if annotation.label in counts:
+                counts[annotation.label] += 1
+        return counts
+
+    def _game_result_dialogue(self, title: str, reason: str) -> str:
+        if self.game_mode == 'coach':
+            return self.coach_service.game_result_comment(title, reason)
+        event = 'draw' if title == 'Draw' else ('loss' if title == 'You Won' else 'win')
+        return self.bot_personality_service.comment(self.bot_profile, event)
+
+    def _rematch_from_modal(self, dialog: QDialog) -> None:
+        dialog.close()
+        if self.game_mode == 'coach':
+            self._start_coach_game(self.coach_profile)
+        elif self.game_mode == 'local':
+            self._start_friend_game()
+        else:
+            self._start_bot_game(self.bot_profile)
+
+    def _menu_from_modal(self, dialog: QDialog) -> None:
+        dialog.close()
+        self._show_start_menu()
 
     def _toggle_review_mode(self) -> None:
-        self.review_is_full = not self.review_is_full
-        self.review_toggle_button.setText('Minimized' if self.review_is_full else 'Full')
+        if self.review_side_stack.currentIndex() == 0:
+            self._start_move_review()
+            return
+        self.review_side_stack.setCurrentIndex(0)
+        self.review_toggle_button.setText('Review')
         if self._game_over and self.board.move_stack:
             self.review_rows = self._review_rows_from_annotations()
             self._refresh_review_tables()
+
+    def _start_move_review(self) -> None:
+        self.review_side_stack.setCurrentIndex(1)
+        self.review_toggle_button.setText('Summary')
+        if self.review_rows:
+            self._jump_review_move(self.review_index)
 
     def _initial_review_annotations(self) -> dict[int, MoveAnnotation]:
         annotations = {}
@@ -1358,13 +1798,25 @@ class MainWindow(QMainWindow):
             label = annotation.label if annotation.label in REVIEW_CATEGORIES_FULL else 'good'
             stats[node.side]['moves'] += 1
             stats[node.side]['loss'] += annotation.loss_cp
+            if annotation.analysed:
+                stats[node.side]['analysed_moves'] += 1
+                stats[node.side]['weighted_accuracy'] += annotation.move_accuracy * annotation.weight
+                stats[node.side]['weight'] += annotation.weight
+                stats[node.side]['weighted_loss'] += annotation.loss_cp * annotation.weight
+                stats[node.side]['weighted_loss_weight'] += annotation.weight
+                if annotation.estimated:
+                    stats[node.side]['estimated_moves'] += 1
+                if self.settings_manager.settings.debug_review_logging:
+                    LOGGER.info('Review debug ply %s: %s', node.ply, annotation.debug)
             stats[node.side][label] += 1
         return stats
 
     def _refresh_review_tables(self) -> None:
+        start = time.perf_counter()
         review = {'categories': self._stats_from_annotations(), 'rows': self.review_rows}
         self._populate_review_tables(review)
         self.review_box.setPlainText(self._review_report_text(review))
+        LOGGER.info('Move tree update cost %.1f ms', (time.perf_counter() - start) * 1000)
 
     def _opening_for_ply(self, ply: int) -> dict:
         moves = [node.uci for node in self.review_navigator.nodes[: max(0, ply)]]
@@ -1429,7 +1881,9 @@ class MainWindow(QMainWindow):
         return {'categories': categories, 'rows': rows}
 
     def _empty_review_stats(self) -> dict:
-        return {key: 0 for key in (*REVIEW_CATEGORIES_FULL, 'moves', 'loss')}
+        stats = {key: 0 for key in (*REVIEW_CATEGORIES_FULL, 'moves', 'loss', 'analysed_moves', 'estimated_moves')}
+        stats.update({'weighted_accuracy': 0.0, 'weight': 0.0, 'weighted_loss': 0.0, 'weighted_loss_weight': 0.0})
+        return stats
 
     def _classify_review_move(self, board: chess.Board, move: chess.Move, index: int) -> dict:
         if self.analysis_engine is None:
@@ -1664,15 +2118,21 @@ class MainWindow(QMainWindow):
         return score * 100
 
     def _populate_review_tables(self, review: dict) -> None:
-        categories = REVIEW_CATEGORIES_FULL if self.review_is_full else REVIEW_CATEGORIES_MIN
+        categories = REVIEW_CATEGORIES_FULL
         stats = review['categories']
         player_accuracy = self._accuracy_for(stats[chess.WHITE])
         bot_accuracy = self._accuracy_for(stats[chess.BLACK])
-        player_elo = self._elo_for(stats[chess.WHITE])
-        bot_elo = self._elo_for(stats[chess.BLACK])
+        player_elo, player_confidence, player_reason = self._rating_estimate(stats[chess.WHITE])
+        bot_elo, bot_confidence, bot_reason = self._rating_estimate(stats[chess.BLACK])
         self._set_review_card(self.review_player_card, 'Player', player_accuracy, 'Accuracy')
         self._set_review_card(self.review_bot_card, str(self.bot_profile['name']), bot_accuracy, 'Accuracy')
-        self._set_review_card(self.review_rating_card, 'Game Rating', f'{player_elo} / {bot_elo}', 'Player / Bot')
+        self._set_review_card(self.review_rating_card, 'Estimated Rating', f'{player_elo} / {bot_elo}', f'{player_confidence} / {bot_confidence}')
+        opening = self.opening_repertoire.opening_for_moves([move.uci() for move in self.board.move_stack])
+        self.review_opening_summary.setText(
+            f"Opening: {opening.get('name', 'Game in progress')}\n"
+            f'Player: {player_reason}\n'
+            f"{self.bot_profile['name']}: {bot_reason}"
+        )
         self.review_summary_table.setRowCount(len(categories))
         row = 0
         for category in categories:
@@ -1692,14 +2152,98 @@ class MainWindow(QMainWindow):
         for item in review['rows']:
             row = (item['index'] - 1) // 2
             column = 1 if item['side'] == chess.WHITE else 2
-            label = f"{REVIEW_MARKERS[item['category']]} {item['san']} ({item['eval'] / 100:+.2f})"
+            label = self._review_move_list_label(item)
             move_item = QTableWidgetItem(label)
             move_item.setData(Qt.ItemDataRole.UserRole, item)
             self.review_moves_table.setItem(row, column, move_item)
-            eval_item = QTableWidgetItem(f"{item['eval'] / 100:+.2f}")
+            eval_item = QTableWidgetItem(f"{item['category'].title()} ({self._delta_text(self._move_eval_delta(item))})")
             eval_item.setData(Qt.ItemDataRole.UserRole, item)
             self.review_moves_table.setItem(row, 3, eval_item)
         self._append_variation_rows(move_count)
+
+    def _review_move_list_label(self, item: dict) -> str:
+        move_no = (int(item['index']) + 1) // 2
+        prefix = f'{move_no}.' if item['side'] == chess.WHITE else f'{move_no}...'
+        marker = REVIEW_MARKERS.get(item['category'], '')
+        return f"{prefix} {item['san']} {marker} ({self._delta_text(self._move_eval_delta(item))})"
+
+    def _move_eval_delta(self, item: dict) -> float:
+        annotation = self.review_annotations.get(int(item.get('index', 0)))
+        if annotation is None:
+            return 0.0
+        if annotation.label in {'book', 'best', 'brilliant', 'great'}:
+            return 0.0
+        return -float(annotation.loss_cp) / 100.0
+
+    def _delta_text(self, delta: float) -> str:
+        if abs(delta) < 0.05:
+            delta = 0.0
+        return f'{delta:+.1f}'
+
+    def _eval_text(self, cp: int | float) -> str:
+        if abs(float(cp)) >= 100000:
+            return '+M' if float(cp) > 0 else '-M'
+        pawns = max(-9.9, min(9.9, float(cp) / 100.0))
+        if abs(pawns) < 0.05:
+            pawns = 0.0
+        return f'{pawns:+.1f}'
+
+    def _before_eval_for_item(self, item: dict) -> int:
+        index = int(item.get('index', 1))
+        if index <= 1:
+            return 0
+        previous = next((row for row in self.review_rows if int(row.get('index', 0)) == index - 1), None)
+        return int(previous.get('eval', 0)) if previous else 0
+
+    def _specific_coach_comment(self, item: dict, annotation: MoveAnnotation, opening: dict) -> str:
+        best = annotation.analysis.best_move_san if annotation.analysis and annotation.analysis.best_move_san else None
+        san = str(item.get('san', 'This move'))
+        label = annotation.label
+        before = self._eval_text(annotation.eval_before_cp if annotation.analysed else self._before_eval_for_item(item))
+        after = self._eval_text(annotation.played_eval_cp if annotation.analysed else int(item.get('eval', 0)))
+        delta = self._delta_text(self._move_eval_delta(item))
+        main_line = ''
+        if annotation.analysis and annotation.analysis.lines:
+            main_line = ' Stockfish main line is ' + (' '.join(annotation.analysis.lines[0].pv_san) or annotation.analysis.lines[0].san) + '.'
+        if label == 'book':
+            return f"{san} was a book move in {opening.get('name', 'the opening')}. Keep developing pieces and protecting your king.{main_line}"
+        if label in {'brilliant', 'great'}:
+            return f'{san} was a strong practical move. The evaluation moved from {before} to {after} ({delta}). It creates a concrete problem while keeping your position coordinated.{main_line}'
+        if label in {'best', 'excellent'}:
+            return f'{san} was {label}. The evaluation changed from {before} to {after}, so there was no meaningful loss.{main_line}'
+        if label == 'good':
+            return f'{san} is playable. The evaluation changed from {before} to {after} ({delta}), so your position remains healthy.{main_line}'
+        if best and label in {'inaccuracy', 'mistake', 'blunder', 'miss'}:
+            if label == 'miss':
+                return f'{san} missed a stronger chance. The evaluation changed from {before} to {after} ({delta}). Stockfish preferred {best}, which creates more immediate pressure.{main_line}'
+            return f'{san} was a {label}. The evaluation changed from {before} to {after}, a {delta} swing. Stockfish preferred {best}.{main_line}'
+        return self.coach_service.comment(annotation, annotation.analysis, board=self.review_board_state, opening=opening)
+
+    def _set_review_engine_loading(self, fen: str, message: str = 'Analyzing with Stockfish...') -> None:
+        self.selected_analysis_fen = chess.Board(fen).fen()
+        self.selected_engine_line = None
+        self.review_lines_table.setRowCount(0)
+        self.review_binding.show_waiting(message)
+
+    def _request_review_analysis(self, fen: str, message: str = 'Analyzing with Stockfish...') -> None:
+        self._set_review_engine_loading(fen, message)
+        if not self.analysis_controller or not self.settings_manager.settings.enable_stockfish_analysis:
+            return
+        self.analysis_controller.analyze_selected(
+            self.selected_analysis_fen,
+            lines=self.analysis_line_count,
+            time_seconds=self.analysis_time_seconds,
+            threads=self.analysis_threads,
+        )
+
+    def _rerun_selected_analysis(self) -> None:
+        if self.stack.currentWidget() != self.review_page:
+            return
+        if self.selected_variation_fen:
+            self._request_review_analysis(self.selected_variation_fen, 'Analyzing selected variation...')
+            return
+        if self.review_rows:
+            self._show_review_position(self.review_rows[self.review_index])
 
     def _append_variation_rows(self, start_row: int) -> None:
         original_ids = {row.get('node_id') for row in self.review_rows}
@@ -1792,6 +2336,9 @@ class MainWindow(QMainWindow):
         self.review_eval_bar.set_result(None)
         self.review_eval_bar.set_evaluation(int(line.score_cp))
         self._update_review_material_display()
+        self.selected_variation_fen = preview.fen()
+        self._request_review_analysis(preview.fen(), 'Previewing and analyzing Stockfish line...')
+        self.selected_engine_line = line
         self._update_status('Previewing Stockfish line')
 
     def _on_review_board_move(self, move_uci: str) -> None:
@@ -1860,18 +2407,13 @@ class MainWindow(QMainWindow):
         self.review_binding.show_waiting(f'{node.source.title()} variation: {node.san}')
         self.review_coach_label.setText('This is a saved analysis branch. It does not change the original game.')
         self.selected_variation_fen = node.after_fen
-        if self.analysis_controller and self.settings_manager.settings.enable_stockfish_analysis:
-            self.analysis_controller.analyze_selected(
-                node.after_fen,
-                lines=self.analysis_line_count,
-                time_seconds=self.analysis_time_seconds,
-                threads=self.analysis_threads,
-            )
+        self._request_review_analysis(node.after_fen, 'Analyzing selected variation...')
         self._update_review_material_display()
 
     def _show_review_position(self, item: dict, analyze: bool = True) -> None:
         self.review_index = max(0, next((index for index, row in enumerate(self.review_rows) if row is item or row.get('index') == item.get('index')), self.review_index))
         self.selected_engine_line = None
+        self.selected_variation_fen = None
         self.selected_review_node_id = item.get('node_id') or None
         if self.selected_review_node_id:
             self.move_tree.select(self.selected_review_node_id)
@@ -1892,22 +2434,18 @@ class MainWindow(QMainWindow):
         opening = self._opening_for_ply(max(0, int(item['index']) - 1))
         best_move_uci = annotation.analysis.best_move_uci if annotation.analysis else None
         self.review_board_widget.set_review_overlay(self.overlay_manager.state_for(move, annotation.label, best_move_uci))
-        if annotation.analysis:
+        if annotation.analysis and not analyze:
             self.review_binding.show_analysis(annotation.analysis, annotation, opening)
-        else:
-            book_moves = ', '.join(move['san'] for move in opening.get('book_moves', [])) or '-'
-            self.review_binding.show_waiting(
-                f"{REVIEW_MARKERS.get(item['category'], '')} {item['san']} | analyzing with Stockfish...\n"
-                f"{opening.get('name', 'Unknown Opening')} | Book moves: {book_moves}"
-            )
-        self.review_coach_label.setText(self.coach_service.comment(annotation, annotation.analysis))
-        if analyze and self.analysis_controller and node and self.settings_manager.settings.enable_stockfish_analysis:
-            self.analysis_controller.analyze_selected(
-                node.before_fen,
-                lines=self.analysis_line_count,
-                time_seconds=self.analysis_time_seconds,
-                threads=self.analysis_threads,
-            )
+        elif not analyze:
+            self.review_lines_table.setRowCount(0)
+        self.review_move_header.setText(
+            f"{REVIEW_MARKERS.get(item['category'], '')} {item['category'].title()} ({self._delta_text(self._move_eval_delta(item))})"
+        )
+        self.review_coach_label.setText(
+            self._specific_coach_comment(item, annotation, opening)
+        )
+        if analyze and node:
+            self._request_review_analysis(node.before_fen, f'Analyzing position before {item["san"]}...')
         self._update_review_material_display()
 
     def _review_analysis_text(self, item: dict) -> str:
@@ -1919,10 +2457,22 @@ class MainWindow(QMainWindow):
         return '\n'.join([header, *lines]) + cloud_note
 
     def _on_active_analysis_ready(self, result: AnalysisResult) -> None:
+        if self.stack.currentWidget() == self.game_page:
+            if result.fen != self.board.fen():
+                return
+            start = time.perf_counter()
+            self.eval_bar.set_evaluation({'score_type': result.score_type, 'score_value': result.score_value, 'value': result.score_value})
+            if self.game_mode == 'coach' and self.board.move_stack:
+                opening = self.opening_repertoire.opening_for_moves([move.uci() for move in self.board.move_stack])
+                self.analysis_box.setPlainText(self.coach_service.move_reaction(self.board, self.board.peek(), result, opening))
+            LOGGER.info('UI update cost %.1f ms', (time.perf_counter() - start) * 1000)
+            return
+        if result.fen != self.selected_analysis_fen:
+            return
         node = self._current_review_node()
         if self.selected_variation_fen and result.fen == self.selected_variation_fen:
             self.review_binding.show_analysis(result, None, self.opening_repertoire.opening_for_moves([]))
-            self.review_coach_label.setText(self.coach_service.comment(None, result))
+            self.review_coach_label.setText(self.coach_service.comment(None, result, board=self.review_board_state))
             return
         if node is None or result.fen != node.before_fen:
             return
@@ -1934,7 +2484,6 @@ class MainWindow(QMainWindow):
         item = next((row for row in self.review_rows if row.get('index') == node.ply), None)
         if item:
             self._show_review_position(item, analyze=False)
-        self.review_binding.show_analysis(result, annotation, opening)
 
     def _on_active_analysis_failed(self, message: str) -> None:
         if self.review_binding:
@@ -1970,14 +2519,59 @@ class MainWindow(QMainWindow):
             self.review_summary_table.setItem(row, column, item)
 
     def _accuracy_for(self, stats: dict) -> str:
-        moves = max(1, stats['moves'])
-        avg_loss = stats['loss'] / moves
-        return f'{max(0, min(100, 100 - avg_loss / 6)):.1f}'
+        if stats['analysed_moves'] == 0 or stats['weight'] <= 0:
+            return 'Pending'
+        accuracy = stats['weighted_accuracy'] / stats['weight']
+        suffix = ' partial' if stats['analysed_moves'] < stats['moves'] else ''
+        return f'{max(0, min(100, accuracy)):.1f}%{suffix}'
 
     def _elo_for(self, stats: dict) -> str:
-        moves = max(1, stats['moves'])
-        avg_loss = stats['loss'] / moves
-        return str(max(100, int(2100 - avg_loss * 4)))
+        rating, confidence, _reason = self._rating_estimate(stats)
+        return f'{rating} ({confidence})'
+
+    def _rating_estimate(self, stats: dict) -> tuple[int, str, str]:
+        if stats['analysed_moves'] == 0 or stats['weighted_loss_weight'] <= 0:
+            return 0, 'pending', 'Waiting for analysed moves.'
+        avg_loss = stats['weighted_loss'] / stats['weighted_loss_weight']
+        rating_points = (
+            (8, 2700),
+            (12, 2400),
+            (18, 2100),
+            (25, 1800),
+            (35, 1500),
+            (50, 1200),
+            (70, 1000),
+            (100, 800),
+            (150, 600),
+            (200, 400),
+            (300, 200),
+        )
+        rating = 150
+        for loss, elo in rating_points:
+            if avg_loss <= loss:
+                rating = elo
+                break
+        rating -= stats['blunder'] * 90
+        rating -= stats['mistake'] * 45
+        rating += min(120, (stats['best'] + stats['excellent']) * 10)
+        if stats['moves'] < 20:
+            rating = min(rating, 1400)
+        if stats['moves'] < 10:
+            rating = min(rating, 1000)
+        rating = max(100, min(2800, int(round(rating / 25) * 25)))
+        if stats['analysed_moves'] < 10 or stats['moves'] < 20:
+            confidence = 'Low'
+        elif stats['analysed_moves'] < stats['moves']:
+            confidence = 'Medium'
+        else:
+            confidence = 'High'
+        if stats['moves'] < 20:
+            reason = 'Short game; rating confidence is capped.'
+        elif stats['blunder'] or stats['mistake']:
+            reason = f"Average loss {avg_loss:.0f} cp with {stats['mistake']} mistakes and {stats['blunder']} blunders."
+        else:
+            reason = f'Average loss {avg_loss:.0f} cp across analysed moves.'
+        return rating, confidence, reason
 
     def _review_report_text(self, review: dict) -> str:
         stats = review['categories']
@@ -2016,12 +2610,11 @@ class MainWindow(QMainWindow):
         return max(0, loss)
 
     def _review_line(self, name: str, stats: dict) -> str:
-        moves = max(1, stats['moves'])
-        avg_loss = stats['loss'] / moves
-        accuracy = max(0, min(100, 100 - avg_loss / 6))
-        estimated_elo = max(100, int(2100 - avg_loss * 4))
+        accuracy = self._accuracy_for(stats)
+        estimated_elo, confidence, reason = self._rating_estimate(stats)
         return (
-            f'{name}: {accuracy:.1f}% accuracy, estimated {estimated_elo} Elo\n'
+            f'{name}: Accuracy {accuracy}, Estimated Rating {estimated_elo}, Confidence {confidence}\n'
+            f'{reason}\n'
             f"Best {stats['best']} | Good {stats['good']} | Inaccuracies {stats['inaccuracy']} | "
             f"Mistakes {stats['mistake']} | Blunders {stats['blunder']}"
         )

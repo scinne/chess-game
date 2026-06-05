@@ -72,3 +72,12 @@ class MoveAnnotation:
     evaluation_cp: int = 0
     reason: str = ''
     analysis: AnalysisResult | None = None
+    eval_before_cp: int = 0
+    best_eval_cp: int = 0
+    played_eval_cp: int = 0
+    move_accuracy: float = 100.0
+    weight: float = 1.0
+    analysed: bool = False
+    estimated: bool = True
+    confidence: str = 'low'
+    debug: dict = field(default_factory=dict)

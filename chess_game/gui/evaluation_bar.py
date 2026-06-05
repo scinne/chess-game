@@ -32,11 +32,15 @@ class EvaluationBar(QWidget):
         self._result_label = None
         if isinstance(evaluation, dict) and evaluation.get('type') == 'mate':
             mate = int(evaluation.get('value', 0))
-            target = 2000.0 if mate > 0 else -2000.0
+            target = 1000.0 if mate > 0 else -1000.0
+        elif isinstance(evaluation, dict) and evaluation.get('score_type') == 'mate':
+            mate = int(evaluation.get('score_value', 0))
+            target = 1000.0 if mate > 0 else -1000.0
         elif isinstance(evaluation, dict):
             target = float(evaluation.get('value', 0))
         else:
             target = float(evaluation)
+        target = max(-1000.0, min(1000.0, target))
         self._label = self._compact_label(evaluation, target)
 
         self._animation.stop()
@@ -52,12 +56,16 @@ class EvaluationBar(QWidget):
     def _compact_label(self, evaluation: int | float | dict, target: float) -> str:
         if isinstance(evaluation, dict) and evaluation.get('type') == 'mate':
             mate = max(-99, min(99, int(evaluation.get('value', 0))))
-            return f'M{mate}'
-        pawns = int(round(target / 100.0))
-        pawns = max(-99, min(99, pawns))
-        if pawns > 0:
-            return f'+{pawns}'
-        return str(pawns)
+            sign = '+' if mate > 0 else '-'
+            return f'{sign}M{abs(mate)}'
+        if isinstance(evaluation, dict) and evaluation.get('score_type') == 'mate':
+            mate = max(-99, min(99, int(evaluation.get('score_value', 0))))
+            sign = '+' if mate > 0 else '-'
+            return f'{sign}M{abs(mate)}'
+        pawns = max(-9.9, min(9.9, target / 100.0))
+        if abs(pawns) < 0.05:
+            pawns = 0.0
+        return f'{pawns:+.1f}'
 
     def paintEvent(self, event) -> None:  # noqa: N802
         del event

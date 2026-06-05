@@ -37,4 +37,10 @@ class ReviewPanelBinding:
 
     def show_waiting(self, message: str) -> None:
         self.window.review_analysis_box.setPlainText(message)
-        self.window.review_lines_table.setRowCount(0)
+        table = self.window.review_lines_table
+        table.setRowCount(1)
+        values = ('...', 'Loading', message)
+        for column, value in enumerate(values):
+            item = QTableWidgetItem(value)
+            item.setData(Qt.ItemDataRole.UserRole, None)
+            table.setItem(0, column, item)

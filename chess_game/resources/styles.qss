@@ -314,6 +314,27 @@ QPushButton:pressed {
     border-color: #8eb36d;
 }
 
+#ContextCard {
+    background: #ffffff;
+    color: #263929;
+    border: 1px solid #cbd9c1;
+    border-radius: 10px;
+    text-align: left;
+    font-size: 16px;
+    font-weight: 850;
+    padding: 16px 18px;
+}
+
+#ContextCard:hover {
+    background: #edf7e5;
+    border-color: #8eb36d;
+}
+
+#ContextCard:disabled {
+    color: #8d9a84;
+    background: #f4f8ed;
+}
+
 #GhostButton {
     min-width: 92px;
     min-height: 34px;

@@ -18,3 +18,6 @@ class AnalysisController:
 
     def stop(self) -> None:
         self.manager.stop()
+
+    def clear_cache(self) -> None:
+        self.manager.clear_cache()
