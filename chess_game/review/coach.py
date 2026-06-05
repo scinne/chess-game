@@ -90,31 +90,42 @@ class BotPersonalityService:
         label: str | None = None,
     ) -> str:
         name = str(bot.get('name', 'Bot'))
-        if event == 'opening' and opening:
-            return f"{name}: {opening.get('name', 'This opening')}? I can work with that."
-        if event == 'capture':
-            return f'{name}: I will be keeping that piece, thanks.'
-        if event == 'check':
-            return f'{name}: Check. Nothing personal.'
         if event == 'mistake' or label in {'mistake', 'blunder', 'miss'}:
-            return f'{name}: That looked uncomfortable.'
-        if event == 'win':
-            return f'{name}: Clean enough for me. I will absolutely count it.'
-        if event == 'loss':
-            return f'{name}: Fine, you found the good moves. I noticed.'
-        if event == 'draw':
-            return f'{name}: A peaceful result. Suspicious, but peaceful.'
+            event = 'mistake'
+        line = self._line_from_pool(bot, event, board=board, move=move)
+        if line:
+            if opening and event == 'opening':
+                return line.format(opening=opening.get('name', 'this opening'))
+            return line
         if board and board.is_check():
-            return f'{name}: Your king has paperwork to do.'
+            return self._line_from_pool(bot, 'check', board=board, move=move) or 'Your king has paperwork to do.'
         if move and board:
             before = board.copy(stack=True)
             try:
                 before.pop()
                 if before.is_capture(move):
-                    return f'{name}: Pieces are leaving the board. Excellent.'
+                    return self._line_from_pool(bot, 'capture', board=board, move=move) or 'Pieces are leaving the board.'
             except IndexError:
                 pass
         return str(bot.get('dialogue', f'{name} is ready.'))
+
+    def _line_from_pool(
+        self,
+        bot: dict,
+        event: str,
+        *,
+        board: chess.Board | None = None,
+        move: chess.Move | None = None,
+    ) -> str:
+        pool = bot.get('dialogue_pool')
+        if not isinstance(pool, dict):
+            return ''
+        lines = pool.get(event) or pool.get('move') or ()
+        if not lines:
+            return ''
+        ply = len(board.move_stack) if board else 0
+        move_seed = move.to_square if move else 0
+        return str(lines[(ply + move_seed) % len(lines)])
 
 
 # Backwards-compatible alias for older call sites while the UI migrates.

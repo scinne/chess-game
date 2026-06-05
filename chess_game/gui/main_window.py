@@ -37,6 +37,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from chess_game.bots import BOT_PROFILES, COACH_PROFILES, engine_strength, rating_label
 from chess_game.board import ChessBoard
 from chess_game.engine import StockfishEngine, StockfishNotFoundError
 from chess_game.gui.board_widget import BoardWidget
@@ -56,61 +57,6 @@ from chess_game.review.overlays import BoardOverlayManager
 from chess_game.settings import SettingsManager
 
 LOGGER = logging.getLogger(__name__)
-
-BOT_PROFILES = (
-    {'name': 'Nora Nook', 'elo': 250, 'group': 'Beginner', 'color': '#d99568', 'dialogue': 'I still hang queens, but I do it with confidence.'},
-    {'name': 'Benji Bean', 'elo': 550, 'group': 'Beginner', 'color': '#7fb3d5', 'dialogue': 'I know forks exist. Sometimes I even see them.'},
-    {'name': 'Lina Leaf', 'elo': 650, 'group': 'Beginner', 'color': '#91c788', 'dialogue': 'Careful, I have discovered development.'},
-    {'name': 'Rafa Reed', 'elo': 800, 'group': 'Intermediate', 'color': '#c4a484', 'dialogue': 'One clean tactic and I become unbearable.'},
-    {'name': 'Maya Vale', 'elo': 1000, 'group': 'Intermediate', 'color': '#b48ead', 'dialogue': 'I play principled chess until temptation arrives.'},
-    {'name': 'Theo Flint', 'elo': 1200, 'group': 'Intermediate', 'color': '#e0b15d', 'dialogue': 'I will trade into an endgame and pretend it was planned.'},
-    {'name': 'Iris Stone', 'elo': 1500, 'group': 'Advanced', 'color': '#6fa8a6', 'dialogue': 'Loose pieces make me very interested.'},
-    {'name': 'Caden Knox', 'elo': 1600, 'group': 'Advanced', 'color': '#a36d90', 'dialogue': 'I like pressure, pins, and making you solve things.'},
-    {'name': 'Serena Pike', 'elo': 2000, 'group': 'Master', 'color': '#789262', 'dialogue': 'Tiny weaknesses are still weaknesses.'},
-    {'name': 'Victor Sage', 'elo': 2200, 'group': 'Master', 'color': '#607d9c', 'dialogue': 'I will not rush. That is usually the problem.'},
-)
-COACH_PROFILES = (
-    {
-        'name': 'Beginner Coach',
-        'elo': 400,
-        'group': 'Coach',
-        'color': '#6f9fd8',
-        'description': 'Gentle guidance on development, safety, and simple tactics.',
-        'dialogue': 'I will explain the ideas as we play.',
-    },
-    {
-        'name': 'Novice Coach',
-        'elo': 800,
-        'group': 'Coach',
-        'color': '#73aa6f',
-        'description': 'Practical help with opening plans and loose pieces.',
-        'dialogue': 'We will build habits one move at a time.',
-    },
-    {
-        'name': 'Intermediate Coach',
-        'elo': 1200,
-        'group': 'Coach',
-        'color': '#c39a4b',
-        'description': 'Teaches tactics, candidate moves, and positional tradeoffs.',
-        'dialogue': 'I will point out what changed after each move.',
-    },
-    {
-        'name': 'Advanced Coach',
-        'elo': 1600,
-        'group': 'Coach',
-        'color': '#9a7bc2',
-        'description': 'Sharper review of plans, weaknesses, and missed chances.',
-        'dialogue': 'Let us connect tactics to the position.',
-    },
-    {
-        'name': 'Expert Coach',
-        'elo': 2000,
-        'group': 'Coach',
-        'color': '#607d9c',
-        'description': 'Deeper explanations for engine choices and strategic themes.',
-        'dialogue': 'I will show why the engine move works.',
-    },
-)
 
 PIECE_VALUES = {
     chess.PAWN: 1,
@@ -187,7 +133,7 @@ class MainWindow(QMainWindow):
         self.board = ChessBoard()
         self.bot_profile = BOT_PROFILES[0]
         self.coach_profile = COACH_PROFILES[1]
-        self.difficulty = int(self.bot_profile['elo'])
+        self.difficulty = engine_strength(self.bot_profile)
         self.game_mode = 'bot'
         self.player_side: chess.Color = chess.WHITE
         self.pending_side_choice = 'white'
@@ -619,7 +565,7 @@ class MainWindow(QMainWindow):
         return panel
 
     def _bot_card(self, bot: dict) -> QPushButton:
-        button = QPushButton(f"{bot['name']}  {bot['elo']}\n{bot['dialogue']}")
+        button = QPushButton(f"{bot['name']}  {rating_label(bot)}\n{bot['dialogue']}")
         button.setObjectName('BotCardButton')
         avatar = self._bot_avatar(bot)
         button.setIcon(QIcon(avatar))
@@ -631,11 +577,11 @@ class MainWindow(QMainWindow):
     def _select_bot(self, bot: dict) -> None:
         self.selected_bot_profile = bot
         self.selected_bot_icon.setPixmap(self._bot_avatar(bot))
-        self.selected_bot_name.setText(f"{bot['name']}  {bot['elo']} Elo")
+        self.selected_bot_name.setText(f"{bot['name']}  {rating_label(bot)}")
         self.selected_bot_dialogue.setText(str(bot['dialogue']))
 
     def _coach_card(self, coach: dict) -> QPushButton:
-        button = QPushButton(f"{coach['name']}  {coach['elo']}\n{coach['description']}")
+        button = QPushButton(f"{coach['name']}  {rating_label(coach)}\n{coach['description']}")
         button.setObjectName('BotCardButton')
         avatar = self._bot_avatar(coach)
         button.setIcon(QIcon(avatar))
@@ -647,10 +593,15 @@ class MainWindow(QMainWindow):
     def _select_coach(self, coach: dict) -> None:
         self.coach_profile = coach
         self.selected_coach_icon.setPixmap(self._bot_avatar(coach))
-        self.selected_coach_name.setText(f"{coach['name']}  {coach['elo']} Elo")
+        self.selected_coach_name.setText(f"{coach['name']}  {rating_label(coach)}")
         self.selected_coach_dialogue.setText(str(coach['description']))
 
     def _bot_avatar(self, bot: dict) -> QPixmap:
+        avatar_path = Path(str(bot.get('avatar_path', '')))
+        if avatar_path.exists():
+            pixmap = QIcon(str(avatar_path)).pixmap(56, 56)
+            if not pixmap.isNull():
+                return pixmap
         pixmap = QPixmap(56, 56)
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
@@ -1288,7 +1239,7 @@ class MainWindow(QMainWindow):
     def _start_bot_game(self, bot: dict) -> None:
         self.game_mode = 'bot'
         self.bot_profile = bot
-        self.difficulty = int(bot['elo'])
+        self.difficulty = engine_strength(bot)
         if self.pending_side_choice == 'random':
             self.player_side = random.choice((chess.WHITE, chess.BLACK))
         else:
@@ -1304,7 +1255,7 @@ class MainWindow(QMainWindow):
         self.game_mode = 'coach'
         self.coach_profile = coach
         self.bot_profile = coach
-        self.difficulty = int(coach['elo'])
+        self.difficulty = engine_strength(coach)
         self.player_side = chess.WHITE
         self._apply_bot_profile()
         self._analysis_enabled = True
@@ -1324,7 +1275,7 @@ class MainWindow(QMainWindow):
 
     def _apply_bot_profile(self) -> None:
         name = str(self.bot_profile['name'])
-        rating = 'Local' if self.game_mode == 'local' else f"{self.bot_profile['elo']} Elo"
+        rating = 'Local' if self.game_mode == 'local' else rating_label(self.bot_profile)
         self.bot_name_label.setText(name)
         self.bot_rating_label.setText(rating)
         self.review_bot_name_label.setText(name)
@@ -1339,6 +1290,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'game_dialogue_avatar'):
             self.game_dialogue_avatar.setPixmap(self._bot_avatar(self.bot_profile))
             self._set_game_dialogue(str(self.bot_profile.get('dialogue', 'Ready when you are.')))
+        if hasattr(self, 'review_coach_avatar'):
+            self.review_coach_avatar.setPixmap(self._bot_avatar(self.bot_profile))
 
     def _set_game_dialogue(self, text: str) -> None:
         compact = ' '.join(str(text).split())

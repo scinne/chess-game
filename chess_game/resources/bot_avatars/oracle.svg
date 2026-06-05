@@ -1,0 +1,7 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'>
+<defs><filter id='soft' x='-20%' y='-20%' width='140%' height='140%'><feDropShadow dx='0' dy='2' stdDeviation='2' flood-color='#000' flood-opacity='.22'/></filter></defs>
+<g filter='url(#soft)'>
+<path d='M24 119 C29 86 39 74 64 74 C89 74 99 86 104 119 Z' fill='#8666d1' opacity='.28'/>
+<path d='M31 119 C36 91 92 91 97 119 Z' fill='#6952bf'/><path d='M42 92 C48 105 80 105 86 92 L79 84 C72 91 56 91 49 84 Z' fill='#c59ee6'/><circle cx='64' cy='52' r='27' fill='#c59ee6'/><path d='M37 47 C39 25 52 14 68 16 C85 18 94 32 93 52 C82 40 64 36 43 45 Z' fill='#2b2144'/><path d='M32 67 C32 30 48 15 64 15 C82 15 96 31 96 68 C83 55 45 55 32 67 Z' fill='#3a2865'/><circle cx='53' cy='53' r='5' fill='#cfffff'/><circle cx='75' cy='53' r='5' fill='#cfffff'/><circle cx='53' cy='55' r='3.5' fill='#202020'/><circle cx='75' cy='55' r='3.5' fill='#202020'/><path d='M55 70 Q64 77 73 70' fill='none' stroke='#6d392d' stroke-width='4' stroke-linecap='round'/><path d='M39 119 L89 119 L83 91 C78 101 50 101 45 91 Z' fill='#ffffff' opacity='.18'/>
+</g>
+</svg>
