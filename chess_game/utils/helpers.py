@@ -16,18 +16,18 @@ RESOURCES_DIR = BASE_DIR / 'resources'
 PIECES_DIR = RESOURCES_DIR / 'pieces'
 
 UNICODE_PIECES = {
-    'P': '♙',
-    'N': '♘',
-    'B': '♗',
-    'R': '♖',
-    'Q': '♕',
-    'K': '♔',
-    'p': '♟',
-    'n': '♞',
-    'b': '♝',
-    'r': '♜',
-    'q': '♛',
-    'k': '♚',
+    'P': '\u2659',
+    'N': '\u2658',
+    'B': '\u2657',
+    'R': '\u2656',
+    'Q': '\u2655',
+    'K': '\u2654',
+    'p': '\u265f',
+    'n': '\u265e',
+    'b': '\u265d',
+    'r': '\u265c',
+    'q': '\u265b',
+    'k': '\u265a',
 }
 
 
@@ -48,14 +48,14 @@ def piece_to_symbol(piece: chess.Piece | None) -> str:
     return UNICODE_PIECES.get(piece.symbol(), '')
 
 
-@functools.lru_cache(maxsize=64)
+@functools.lru_cache(maxsize=128)
 def load_piece_image(piece_symbol: str, theme: str = 'default', size: int = 80) -> 'QPixmap':
-    """Load and rasterize a themed SVG piece image into a QPixmap."""
-    from PyQt6.QtCore import Qt
+    """Load and rasterize a centered themed SVG piece image."""
+    from PyQt6.QtCore import QRectF, Qt
     from PyQt6.QtGui import QPainter, QPixmap
     from PyQt6.QtSvg import QSvgRenderer
 
-    del theme  # single theme currently available
+    del theme
     color = 'white' if piece_symbol.isupper() else 'black'
     name_map = {
         'k': 'king',
@@ -65,13 +65,19 @@ def load_piece_image(piece_symbol: str, theme: str = 'default', size: int = 80) 
         'n': 'knight',
         'p': 'pawn',
     }
-    piece_name = name_map[piece_symbol.lower()]
-    path = PIECES_DIR / f'{color}_{piece_name}.svg'
-    renderer = QSvgRenderer(str(path))
-    pixmap = QPixmap(size, size)
+    path = PIECES_DIR / f'{color}_{name_map[piece_symbol.lower()]}.svg'
+    scale = 5
+    physical_size = size * scale
+    pixmap = QPixmap(physical_size, physical_size)
+    pixmap.setDevicePixelRatio(scale)
     pixmap.fill(Qt.GlobalColor.transparent)
+
+    renderer = QSvgRenderer(str(path))
     painter = QPainter(pixmap)
-    renderer.render(painter)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    padding = size * 0.025
+    renderer.render(painter, QRectF(padding, padding, size - padding * 2, size - padding * 2))
     painter.end()
     return pixmap
 

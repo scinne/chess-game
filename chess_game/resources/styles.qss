@@ -1,13 +1,487 @@
-QMainWindow {
-    background: #f4f4f4;
+QMainWindow,
+QWidget {
+    background: #e9f0df;
+    color: #243126;
+    font-family: "Segoe UI";
+    font-size: 14px;
+    selection-background-color: transparent;
+    selection-color: #243126;
 }
-QDockWidget {
+
+QLabel {
+    background: transparent;
+    selection-background-color: transparent;
+    selection-color: #243126;
+}
+
+QMenuBar {
+    background: #f7faef;
+    color: #243126;
+    border-bottom: 1px solid #d5dec8;
+    padding: 5px 12px;
+}
+
+QMenuBar::item {
+    padding: 6px 12px;
+    background: transparent;
+    border-radius: 5px;
+}
+
+QMenuBar::item:selected {
+    background: #dbe8ce;
+}
+
+QMenu {
+    background: #fbfdf6;
+    color: #243126;
+    border: 1px solid #cdd9c1;
+}
+
+QMenu::item {
+    padding: 8px 30px 8px 20px;
+}
+
+QMenu::item:selected {
+    background: #89b765;
+    color: #ffffff;
+}
+
+#BoardColumn,
+#ReviewBoardColumn {
+    background: #e9f0df;
+}
+
+#StartPage,
+#ReviewPage {
+    background: #e9f0df;
+}
+
+#StartHero,
+#StartSide,
+#ReviewSide,
+#MainMenuPanel,
+#BotGroupPanel,
+#SideChoicePanel,
+#SelectedBotPanel,
+#SettingsDialog {
+    background: #fbfdf6;
+    border: 1px solid #d4deca;
+    border-radius: 12px;
+}
+
+#MainMenuPanel {
+    min-width: 340px;
+    max-width: 420px;
+}
+
+#StartTitle {
+    color: #243126;
+    font-size: 42px;
+    font-weight: 900;
+}
+
+#StartSubtitle {
+    color: #64725f;
+    font-size: 17px;
+}
+
+#MenuTitle {
+    color: #243126;
+    font-size: 34px;
+    font-weight: 900;
+}
+
+#MenuPlayer {
+    color: #64725f;
+    font-size: 16px;
+    font-weight: 750;
+}
+
+#PlayerStrip {
+    background: #fbfdf6;
+    border: 1px solid #d4deca;
+    border-radius: 8px;
+}
+
+#StripName {
+    color: #263929;
+    font-size: 16px;
+    font-weight: 850;
+}
+
+#StripRating {
+    color: #64725f;
+    font-size: 14px;
+    font-weight: 650;
+}
+
+#CapturedPieces {
+    color: #526447;
+    font-size: 18px;
+    font-weight: 750;
+}
+
+#CoachPanel {
+    background: #f3f7eb;
+    border-left: 1px solid #d4deca;
+}
+
+#PanelHeader {
+    background: #fbfdf6;
+    color: #263929;
+    font-size: 21px;
+    font-weight: 850;
+    padding: 15px 18px;
+    border: 1px solid #d4deca;
+    border-radius: 9px;
+}
+
+#GameStatus {
+    background: #fbfdf6;
+    color: #3c4a39;
+    border: 1px solid #d4deca;
+    border-radius: 9px;
+    padding: 16px 18px;
+    font-size: 15px;
+    font-weight: 650;
+}
+
+#OpeningLabel {
+    color: #64725f;
+    background: #fbfdf6;
+    border: 1px solid #d4deca;
+    border-radius: 7px;
+    padding: 9px 12px;
+}
+
+#AnalysisBox,
+#ReviewBox {
+    background: #fbfdf6;
+    color: #3c4a39;
+    border: 1px solid #d4deca;
+    border-radius: 8px;
+    padding: 8px;
+    font-family: "Segoe UI";
     font-size: 13px;
 }
-QListWidget {
+
+#CoachComment {
     background: #ffffff;
-    border: 1px solid #cccccc;
+    color: #314331;
+    border: 1px solid #d4deca;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+    font-weight: 750;
 }
+
+#MovesTitle {
+    color: #263929;
+    font-size: 16px;
+    font-weight: 850;
+    padding: 0 2px;
+}
+
+QTableWidget {
+    background: #fbfdf6;
+    alternate-background-color: #f2f7ea;
+    color: #2d3b2e;
+    border: 1px solid #d4deca;
+    border-radius: 8px;
+    gridline-color: #e0e8d7;
+    selection-background-color: #f2f7ea;
+    selection-color: #243126;
+}
+
+QLineEdit,
+QTextEdit,
+QPlainTextEdit,
+QAbstractItemView {
+    selection-background-color: #f2f7ea;
+    selection-color: #243126;
+}
+
+QTableWidget::item:selected {
+    background: #f2f7ea;
+    color: #243126;
+}
+
+QHeaderView::section {
+    background: #eef5e5;
+    color: #526447;
+    border: none;
+    border-bottom: 1px solid #d4deca;
+    padding: 7px 9px;
+    font-weight: 850;
+}
+
+QTableWidget::item {
+    padding: 5px 9px;
+    font-weight: 650;
+}
+
+QScrollBar:vertical {
+    background: #edf4e5;
+    width: 10px;
+    margin: 2px;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:vertical {
+    background: #a9bd98;
+    border-radius: 5px;
+    min-height: 28px;
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    height: 0;
+}
+
 QPushButton {
-    padding: 6px;
+    min-height: 34px;
+    padding: 8px 14px;
+    border: 1px solid #b7c9a7;
+    border-radius: 9px;
+    background: #fbfdf6;
+    color: #263929;
+    font-weight: 800;
+}
+
+QPushButton:focus {
+    border: 1px solid #8eb36d;
+}
+
+QPushButton:hover {
+    background: #f5faee;
+    border-color: #8eb36d;
+}
+
+QPushButton:pressed {
+    background: #dcebcf;
+}
+
+#ActionButton,
+#StartAction,
+#ReviewTopButton {
+    background: #78aa55;
+    color: #ffffff;
+    border: 1px solid #699a49;
+}
+
+#ActionButton {
+    min-height: 46px;
+    font-size: 15px;
+}
+
+#ActionButton:hover,
+#StartAction:hover,
+#ReviewTopButton:hover {
+    background: #86b962;
+    border-color: #75a852;
+}
+
+#ActionButton:pressed,
+#StartAction:pressed,
+#ReviewTopButton:pressed {
+    background: #659348;
+}
+
+#BotButton {
+    background: #fbfdf6;
+    color: #263929;
+    border: 1px solid #d4deca;
+    border-radius: 10px;
+    text-align: left;
+    font-size: 16px;
+    font-weight: 850;
+    padding: 14px;
+}
+
+#MenuButton {
+    background: #ffffff;
+    color: #263929;
+    border: 1px solid #cbd9c1;
+    border-radius: 12px;
+    text-align: left;
+    font-size: 17px;
+    font-weight: 900;
+    padding: 14px 18px;
+}
+
+#MenuButton:hover {
+    background: #edf7e5;
+    border-color: #8eb36d;
+}
+
+#GhostButton {
+    min-width: 92px;
+    min-height: 34px;
+    background: #fbfdf6;
+    color: #526447;
+    border: 1px solid #d4deca;
+    border-radius: 8px;
+}
+
+#BotButton:hover {
+    background: #e5f1dc;
+    border-color: #8eb36d;
+}
+
+#StartAction {
+    min-width: 160px;
+    min-height: 44px;
+    border-radius: 9px;
+}
+
+#ReviewTopButton {
+    min-width: 92px;
+    min-height: 32px;
+    padding: 6px 12px;
+    border-radius: 8px;
+}
+
+#SideChoiceLabel {
+    color: #526447;
+    font-size: 15px;
+    font-weight: 850;
+    padding-right: 8px;
+}
+
+#SideButton {
+    min-width: 92px;
+    min-height: 34px;
+    background: #f4f8ed;
+    color: #263929;
+    border: 1px solid #d4deca;
+    border-radius: 8px;
+}
+
+#SideButton[selected="true"] {
+    background: #78aa55;
+    color: #ffffff;
+    border-color: #699a49;
+}
+
+#BotScroll {
+    background: transparent;
+    border: none;
+}
+
+#BotGroupTitle {
+    color: #263929;
+    font-size: 20px;
+    font-weight: 900;
+}
+
+#BotGroupCount {
+    color: #7a886f;
+    font-size: 13px;
+    font-weight: 750;
+}
+
+#BotCardButton {
+    background: #f4f8ed;
+    color: #263929;
+    border: 1px solid #d4deca;
+    border-radius: 10px;
+    text-align: left;
+    font-size: 13px;
+    font-weight: 750;
+    padding: 10px;
+}
+
+#BotCardButton:hover {
+    background: #e5f1dc;
+    border-color: #8eb36d;
+}
+
+#SelectedBotName {
+    color: #263929;
+    font-size: 20px;
+    font-weight: 900;
+}
+
+#SelectedBotDialogue {
+    color: #314331;
+    font-size: 15px;
+    font-weight: 800;
+}
+
+#ReviewNavButton {
+    min-height: 42px;
+    background: #f4f8ed;
+    color: #263929;
+    border: 1px solid #d4deca;
+    border-radius: 9px;
+    font-size: 18px;
+    font-weight: 900;
+}
+
+#ReviewNavButton:hover {
+    background: #e5f1dc;
+    border-color: #8eb36d;
+}
+
+QComboBox,
+QSpinBox {
+    min-height: 32px;
+    background: #f4f8ed;
+    color: #263929;
+    border: 1px solid #d4deca;
+    border-radius: 8px;
+    padding: 4px 8px;
+}
+
+QCheckBox {
+    color: #263929;
+    font-weight: 700;
+}
+
+#ReviewStatCard {
+    background: #fbfdf6;
+    border: 1px solid #d4deca;
+    border-radius: 10px;
+}
+
+#ReviewCardTitle {
+    color: #64725f;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+#ReviewCardValue {
+    color: #263929;
+    font-size: 26px;
+    font-weight: 900;
+}
+
+#ReviewCardCaption {
+    color: #7a886f;
+    font-size: 12px;
+    font-weight: 650;
+}
+
+#DialogTitle,
+#GameOverTitle {
+    color: #263929;
+    font-size: 26px;
+    font-weight: 900;
+}
+
+#DialogSubtitle,
+#GameOverDetail {
+    color: #64725f;
+    font-size: 15px;
+    font-weight: 650;
+}
+
+QStatusBar {
+    background: #f7faef;
+    color: #64725f;
+    border-top: 1px solid #d4deca;
+}
+
+QSplitter::handle {
+    background: #d5dec8;
 }

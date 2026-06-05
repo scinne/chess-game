@@ -1,0 +1,4 @@
+Chess piece artwork is based on the Cburnett SVG chess piece set.
+Source: Wikimedia Commons / python-chess bundled SVG assets.
+Author: Cburnett
+Licensing: BSD, GPL, and GFDL license options are listed on Wikimedia Commons for the Cburnett pieces.

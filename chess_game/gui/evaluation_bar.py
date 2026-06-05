@@ -5,10 +5,8 @@ from __future__ import annotations
 import math
 
 from PyQt6.QtCore import QEasingCurve, QVariantAnimation, Qt
-from PyQt6.QtGui import QColor, QPainter
+from PyQt6.QtGui import QColor, QFont, QPainter
 from PyQt6.QtWidgets import QWidget
-
-from chess_game.utils.helpers import format_evaluation
 
 
 class EvaluationBar(QWidget):
@@ -18,9 +16,10 @@ class EvaluationBar(QWidget):
         super().__init__(parent)
         self.setMinimumWidth(52)
         self._eval = 0.0
-        self._label = '0.00'
+        self._label = '0'
+        self._result_label: str | None = None
         self._animation = QVariantAnimation(self)
-        self._animation.setDuration(220)
+        self._animation.setDuration(180)
         self._animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
         self._animation.valueChanged.connect(self._on_animate)
 
@@ -30,7 +29,7 @@ class EvaluationBar(QWidget):
 
     def set_evaluation(self, evaluation: int | float | dict) -> None:
         """Set evaluation value and animate bar update."""
-        self._label = format_evaluation(evaluation)
+        self._result_label = None
         if isinstance(evaluation, dict) and evaluation.get('type') == 'mate':
             mate = int(evaluation.get('value', 0))
             target = 2000.0 if mate > 0 else -2000.0
@@ -38,11 +37,27 @@ class EvaluationBar(QWidget):
             target = float(evaluation.get('value', 0))
         else:
             target = float(evaluation)
+        self._label = self._compact_label(evaluation, target)
 
         self._animation.stop()
         self._animation.setStartValue(self._eval)
         self._animation.setEndValue(target)
         self._animation.start()
+
+    def set_result(self, result: str | None) -> None:
+        """Show a game result instead of the numeric evaluation label."""
+        self._result_label = result
+        self.update()
+
+    def _compact_label(self, evaluation: int | float | dict, target: float) -> str:
+        if isinstance(evaluation, dict) and evaluation.get('type') == 'mate':
+            mate = max(-99, min(99, int(evaluation.get('value', 0))))
+            return f'M{mate}'
+        pawns = int(round(target / 100.0))
+        pawns = max(-99, min(99, pawns))
+        if pawns > 0:
+            return f'+{pawns}'
+        return str(pawns)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         del event
@@ -63,5 +78,10 @@ class EvaluationBar(QWidget):
         painter.setBrush(QColor(245, 245, 245))
         painter.drawRoundedRect(white_rect, 6, 6)
 
+        label = self._result_label or self._label
+        font = QFont('Segoe UI')
+        font.setPixelSize(9)
+        font.setBold(True)
+        painter.setFont(font)
         painter.setPen(QColor(220, 220, 220) if white_ratio < 0.35 else QColor(20, 20, 20))
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self._label)
+        painter.drawText(rect.adjusted(1, 0, -1, 0), Qt.AlignmentFlag.AlignCenter, label)
