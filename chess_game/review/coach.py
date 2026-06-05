@@ -79,14 +79,41 @@ class CoachService:
 class BotPersonalityService:
     """Creates non-instructional bot flavor dialogue."""
 
-    def comment(self, bot: dict, event: str = 'move') -> str:
+    def comment(
+        self,
+        bot: dict,
+        event: str = 'move',
+        *,
+        board: chess.Board | None = None,
+        move: chess.Move | None = None,
+        opening: dict | None = None,
+        label: str | None = None,
+    ) -> str:
         name = str(bot.get('name', 'Bot'))
+        if event == 'opening' and opening:
+            return f"{name}: {opening.get('name', 'This opening')}? I can work with that."
+        if event == 'capture':
+            return f'{name}: I will be keeping that piece, thanks.'
+        if event == 'check':
+            return f'{name}: Check. Nothing personal.'
+        if event == 'mistake' or label in {'mistake', 'blunder', 'miss'}:
+            return f'{name}: That looked uncomfortable.'
         if event == 'win':
             return f'{name}: Clean enough for me. I will absolutely count it.'
         if event == 'loss':
             return f'{name}: Fine, you found the good moves. I noticed.'
         if event == 'draw':
             return f'{name}: A peaceful result. Suspicious, but peaceful.'
+        if board and board.is_check():
+            return f'{name}: Your king has paperwork to do.'
+        if move and board:
+            before = board.copy(stack=True)
+            try:
+                before.pop()
+                if before.is_capture(move):
+                    return f'{name}: Pieces are leaving the board. Excellent.'
+            except IndexError:
+                pass
         return str(bot.get('dialogue', f'{name} is ready.'))
 
 

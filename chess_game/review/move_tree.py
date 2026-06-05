@@ -121,6 +121,16 @@ class MoveTree:
             return [node for node in self.nodes.values() if node.parent_node_id is None]
         return [self.nodes[child_id] for child_id in self.nodes[node_id].child_variation_ids if child_id in self.nodes]
 
+    def line_to_node(self, node_id: str) -> list[TreeMoveNode]:
+        """Return the move path from the root to a node."""
+        line = []
+        current = self.nodes.get(node_id)
+        while current is not None:
+            line.append(current)
+            parent_id = current.parent_node_id
+            current = self.nodes.get(parent_id) if parent_id else None
+        return list(reversed(line))
+
     def add_or_select_move(self, parent_id: str, move: chess.Move, source: str = 'user') -> TreeMoveNode:
         parent_fen = self.fen_for_node(parent_id)
         board = chess.Board(parent_fen)

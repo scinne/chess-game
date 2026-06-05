@@ -723,10 +723,24 @@ class MainWindow(QMainWindow):
         self.opening_label = QLabel('Opening: Starting position')
         self.opening_label.setObjectName('OpeningLabel')
 
+        self.game_dialogue_card = QFrame()
+        self.game_dialogue_card.setObjectName('GameDialoguePanel')
+        game_dialogue_layout = QHBoxLayout(self.game_dialogue_card)
+        game_dialogue_layout.setContentsMargins(10, 10, 10, 10)
+        game_dialogue_layout.setSpacing(10)
+        self.game_dialogue_avatar = QLabel()
+        self.game_dialogue_avatar.setPixmap(self._bot_avatar(self.bot_profile))
+        self.game_dialogue_label = QLabel('')
+        self.game_dialogue_label.setObjectName('GameDialogueBubble')
+        self.game_dialogue_label.setWordWrap(True)
+        game_dialogue_layout.addWidget(self.game_dialogue_avatar)
+        game_dialogue_layout.addWidget(self.game_dialogue_label, 1)
+
         self.analysis_box = QTextEdit()
         self.analysis_box.setObjectName('AnalysisBox')
         self.analysis_box.setReadOnly(True)
         self.analysis_box.setMaximumHeight(150)
+        self.analysis_box.hide()
 
         moves_title = QLabel('Moves')
         moves_title.setObjectName('MovesTitle')
@@ -758,6 +772,7 @@ class MainWindow(QMainWindow):
 
         right_layout.addWidget(self.panel_title)
         right_layout.addWidget(self.status_label)
+        right_layout.addWidget(self.game_dialogue_card)
         right_layout.addWidget(self.analysis_box)
         right_layout.addWidget(self.opening_label)
         right_layout.addWidget(moves_title)
@@ -1293,7 +1308,7 @@ class MainWindow(QMainWindow):
         self._apply_bot_profile()
         self._analysis_enabled = True
         self._new_game()
-        self.analysis_box.setPlainText(str(coach.get('dialogue', 'I will explain the ideas as we play.')))
+        self._set_game_dialogue(str(coach.get('dialogue', 'I will explain the ideas as we play.')))
         self.stack.setCurrentWidget(self.game_page)
 
     def _start_friend_game(self) -> None:
@@ -1320,6 +1335,48 @@ class MainWindow(QMainWindow):
             self.panel_title.setText(f'Play Coach: {name}')
         else:
             self.panel_title.setText(f'Play {name}')
+        if hasattr(self, 'game_dialogue_avatar'):
+            self.game_dialogue_avatar.setPixmap(self._bot_avatar(self.bot_profile))
+            self._set_game_dialogue(str(self.bot_profile.get('dialogue', 'Ready when you are.')))
+
+    def _set_game_dialogue(self, text: str) -> None:
+        compact = ' '.join(str(text).split())
+        self.game_dialogue_label.setText(compact)
+        self.game_dialogue_card.setVisible(bool(compact))
+
+    def _bot_event_for_move(self, board_after: chess.Board, move: chess.Move, annotation_label: str | None = None) -> str:
+        before = board_after.copy(stack=True)
+        try:
+            before.pop()
+        except IndexError:
+            before = None
+        if board_after.is_check():
+            return 'check'
+        if before and before.is_capture(move):
+            return 'capture'
+        opening = self._opening_for_board(board_after)
+        if opening.get('in_book') and len(board_after.move_stack) <= 8:
+            return 'opening'
+        if annotation_label in {'mistake', 'blunder', 'miss'}:
+            return 'mistake'
+        return 'move'
+
+    def _update_game_dialogue_for_move(self, move: chess.Move, annotation_label: str | None = None) -> None:
+        opening = self._opening_for_board(self.board)
+        if self.game_mode == 'coach':
+            self._set_game_dialogue(self.coach_service.move_reaction(self.board, move, None, opening))
+        elif self.game_mode == 'bot':
+            event = self._bot_event_for_move(self.board, move, annotation_label)
+            self._set_game_dialogue(
+                self.bot_personality_service.comment(
+                    self.bot_profile,
+                    event,
+                    board=self.board,
+                    move=move,
+                    opening=opening,
+                    label=annotation_label,
+                )
+            )
 
     def _on_position_selected(self, fen: str) -> None:
         if self.stack.currentWidget() == self.review_page:
@@ -1362,6 +1419,7 @@ class MainWindow(QMainWindow):
         self.board_widget.set_premove(None)
         self.pending_premove = None
         self._sync_board_state()
+        self._update_game_dialogue_for_move(move)
 
         if self.board.is_checkmate() or self.board.is_stalemate():
             self._finish_game_status()
@@ -1410,6 +1468,7 @@ class MainWindow(QMainWindow):
             self.board_widget.clear_marks()
             self.board_widget.set_last_move(move)
             self._sync_board_state()
+            self._update_game_dialogue_for_move(move)
 
         self._schedule_active_analysis()
 
@@ -1548,7 +1607,7 @@ class MainWindow(QMainWindow):
         self.move_history.update_from_board(self.board)
         self._update_material_display()
         if self.board.move_stack:
-            opening = self.opening_repertoire.opening_for_moves([move.uci() for move in self.board.move_stack])
+            opening = self._opening_for_board(self.board)
             self.opening_label.setText(f"Opening: {opening.get('name', 'Game in progress')}")
         else:
             self.opening_label.setText('Opening: Starting position')
@@ -1741,7 +1800,13 @@ class MainWindow(QMainWindow):
         moves = []
         for node in self.review_navigator.nodes:
             opening = self.opening_repertoire.opening_for_moves(moves)
-            if opening.get('in_book') and node.ply <= 8:
+            book_moves = {item['uci'] for item in opening.get('book_moves', [])}
+            after_opening = self.opening_repertoire.opening_for_moves([*moves, node.uci])
+            if (
+                node.ply <= 8
+                and (node.uci in book_moves or after_opening.get('in_book'))
+                and after_opening.get('name') != 'Starting Position'
+            ):
                 annotations[node.ply] = MoveAnnotation(node.ply, 'book', 0, 0, 'Known opening book move')
             else:
                 before = chess.Board(node.before_fen)
@@ -1821,6 +1886,14 @@ class MainWindow(QMainWindow):
     def _opening_for_ply(self, ply: int) -> dict:
         moves = [node.uci for node in self.review_navigator.nodes[: max(0, ply)]]
         return self.opening_repertoire.opening_for_moves(moves)
+
+    def _opening_for_tree_node(self, node_id: str | None) -> dict:
+        if node_id and node_id in self.move_tree.nodes:
+            return self.opening_repertoire.opening_for_moves([node.move_uci for node in self.move_tree.line_to_node(node_id)])
+        return self.opening_repertoire.opening_for_moves([node.uci for node in self.review_navigator.nodes])
+
+    def _opening_for_board(self, board: chess.Board) -> dict:
+        return self.opening_repertoire.opening_for_moves([move.uci() for move in board.move_stack])
 
     def _sync_review_row_for_ply(self, ply: int) -> None:
         node = self.review_navigator.node_at(ply)
@@ -2126,8 +2199,8 @@ class MainWindow(QMainWindow):
         bot_elo, bot_confidence, bot_reason = self._rating_estimate(stats[chess.BLACK])
         self._set_review_card(self.review_player_card, 'Player', player_accuracy, 'Accuracy')
         self._set_review_card(self.review_bot_card, str(self.bot_profile['name']), bot_accuracy, 'Accuracy')
-        self._set_review_card(self.review_rating_card, 'Estimated Rating', f'{player_elo} / {bot_elo}', f'{player_confidence} / {bot_confidence}')
-        opening = self.opening_repertoire.opening_for_moves([move.uci() for move in self.board.move_stack])
+        self._set_review_card(self.review_rating_card, 'Estimated Rating', f'{player_elo} / {bot_elo}', f'Confidence: {player_confidence} / {bot_confidence}')
+        opening = self._opening_for_board(self.board)
         self.review_opening_summary.setText(
             f"Opening: {opening.get('name', 'Game in progress')}\n"
             f'Player: {player_reason}\n'
@@ -2405,6 +2478,8 @@ class MainWindow(QMainWindow):
         self.review_eval_bar.set_result(None)
         self.review_eval_bar.set_evaluation(int(node.engine_evaluation or 0))
         self.review_binding.show_waiting(f'{node.source.title()} variation: {node.san}')
+        opening = self._opening_for_tree_node(node.node_id)
+        self.review_opening_summary.setText(f"Opening: {opening.get('name', 'Game in progress')}")
         self.review_coach_label.setText('This is a saved analysis branch. It does not change the original game.')
         self.selected_variation_fen = node.after_fen
         self._request_review_analysis(node.after_fen, 'Analyzing selected variation...')
@@ -2431,7 +2506,8 @@ class MainWindow(QMainWindow):
         self.move_history.select_ply(int(item['index']))
         node = self.review_navigator.node_at(int(item['index']))
         annotation = self.review_annotations.get(int(item['index']), MoveAnnotation(int(item['index'])))
-        opening = self._opening_for_ply(max(0, int(item['index']) - 1))
+        opening = self._opening_for_ply(int(item['index']))
+        self.review_opening_summary.setText(f"Opening: {opening.get('name', 'Game in progress')}")
         best_move_uci = annotation.analysis.best_move_uci if annotation.analysis else None
         self.review_board_widget.set_review_overlay(self.overlay_manager.state_for(move, annotation.label, best_move_uci))
         if annotation.analysis and not analyze:
@@ -2463,15 +2539,15 @@ class MainWindow(QMainWindow):
             start = time.perf_counter()
             self.eval_bar.set_evaluation({'score_type': result.score_type, 'score_value': result.score_value, 'value': result.score_value})
             if self.game_mode == 'coach' and self.board.move_stack:
-                opening = self.opening_repertoire.opening_for_moves([move.uci() for move in self.board.move_stack])
-                self.analysis_box.setPlainText(self.coach_service.move_reaction(self.board, self.board.peek(), result, opening))
+                opening = self._opening_for_board(self.board)
+                self._set_game_dialogue(self.coach_service.move_reaction(self.board, self.board.peek(), result, opening))
             LOGGER.info('UI update cost %.1f ms', (time.perf_counter() - start) * 1000)
             return
         if result.fen != self.selected_analysis_fen:
             return
         node = self._current_review_node()
         if self.selected_variation_fen and result.fen == self.selected_variation_fen:
-            self.review_binding.show_analysis(result, None, self.opening_repertoire.opening_for_moves([]))
+            self.review_binding.show_analysis(result, None, self._opening_for_tree_node(self.move_tree.selected_node_id))
             self.review_coach_label.setText(self.coach_service.comment(None, result, board=self.review_board_state))
             return
         if node is None or result.fen != node.before_fen:
@@ -2520,7 +2596,7 @@ class MainWindow(QMainWindow):
 
     def _accuracy_for(self, stats: dict) -> str:
         if stats['analysed_moves'] == 0 or stats['weight'] <= 0:
-            return 'Pending'
+            return f"{self._fallback_accuracy(stats):.1f}% approx"
         accuracy = stats['weighted_accuracy'] / stats['weight']
         suffix = ' partial' if stats['analysed_moves'] < stats['moves'] else ''
         return f'{max(0, min(100, accuracy)):.1f}%{suffix}'
@@ -2531,7 +2607,9 @@ class MainWindow(QMainWindow):
 
     def _rating_estimate(self, stats: dict) -> tuple[int, str, str]:
         if stats['analysed_moves'] == 0 or stats['weighted_loss_weight'] <= 0:
-            return 0, 'pending', 'Waiting for analysed moves.'
+            rating = self._fallback_rating(stats)
+            reason = 'Very short game, estimate based on limited moves.' if stats['moves'] < 10 else 'Approximate estimate while Stockfish finishes analysis.'
+            return rating, 'Low', reason
         avg_loss = stats['weighted_loss'] / stats['weighted_loss_weight']
         rating_points = (
             (8, 2700),
@@ -2572,6 +2650,34 @@ class MainWindow(QMainWindow):
         else:
             reason = f'Average loss {avg_loss:.0f} cp across analysed moves.'
         return rating, confidence, reason
+
+    def _fallback_accuracy(self, stats: dict) -> float:
+        moves = max(1, stats['moves'])
+        category_penalty = (
+            stats['inaccuracy'] * 7
+            + stats['mistake'] * 15
+            + stats['blunder'] * 28
+            + stats['miss'] * 18
+            - stats['best'] * 2
+            - stats['excellent'] * 1
+        )
+        avg_loss_penalty = min(35.0, (stats['loss'] / moves) / 5.0)
+        short_game_penalty = 6 if moves < 6 else (3 if moves < 10 else 0)
+        return max(12.0, min(99.0, 88.0 - category_penalty / moves - avg_loss_penalty - short_game_penalty))
+
+    def _fallback_rating(self, stats: dict) -> int:
+        moves = max(1, stats['moves'])
+        accuracy = self._fallback_accuracy(stats)
+        rating = 120 + accuracy * 13
+        rating += stats['best'] * 8 + stats['excellent'] * 5 + stats['good'] * 2
+        rating -= stats['mistake'] * 60 + stats['blunder'] * 140 + stats['miss'] * 80 + stats['inaccuracy'] * 25
+        if moves < 10:
+            rating = min(rating, 950)
+        if moves < 6:
+            rating = min(rating, 700)
+        if stats['blunder']:
+            rating = min(rating, 900)
+        return max(100, min(2200, int(round(rating / 25) * 25)))
 
     def _review_report_text(self, review: dict) -> str:
         stats = review['categories']
@@ -2671,6 +2777,12 @@ class MainWindow(QMainWindow):
         self.review_analysis_box.clear()
         self._reset_review_board()
         self._sync_board_state()
+        if self.game_mode == 'coach':
+            self._set_game_dialogue(str(self.coach_profile.get('dialogue', 'I will explain the ideas as we play.')))
+        elif self.game_mode == 'bot':
+            self._set_game_dialogue(self.bot_personality_service.comment(self.bot_profile, 'move'))
+        else:
+            self._set_game_dialogue('')
         if self.game_mode == 'local':
             self._update_status('White to move')
         elif self.player_side == chess.BLACK:

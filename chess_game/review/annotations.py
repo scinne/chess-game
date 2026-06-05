@@ -20,7 +20,7 @@ class ReviewAnnotator:
         before_board = chess.Board(node.before_fen)
         if opening and opening.get('in_book'):
             book_moves = {item['uci'] for item in opening.get('book_moves', [])}
-            if node.uci in book_moves or node.ply <= 4:
+            if node.uci in book_moves:
                 evaluation = analysis.evaluation_cp if analysis else 0
                 return MoveAnnotation(
                     node.ply,

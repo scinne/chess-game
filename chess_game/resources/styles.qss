@@ -126,6 +126,21 @@ QMenu::item:selected {
     border-left: 1px solid #d4deca;
 }
 
+#GameDialoguePanel {
+    background: transparent;
+    border: none;
+}
+
+#GameDialogueBubble {
+    background: #ffffff;
+    color: #314331;
+    border: 1px solid #d4deca;
+    border-radius: 10px;
+    padding: 9px 12px;
+    font-size: 14px;
+    font-weight: 750;
+}
+
 #PanelHeader {
     background: #fbfdf6;
     color: #263929;
