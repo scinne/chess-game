@@ -10,8 +10,8 @@ from pathlib import Path
 
 import chess
 import chess.pgn
-from PyQt6.QtCore import QObject, QThread, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
+from PyQt6.QtCore import QObject, QSize, QThread, QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QSplitter,
     QStackedWidget,
+    QStyle,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -44,6 +45,7 @@ from chess_game.gui.board_widget import BoardWidget
 from chess_game.gui.evaluation_bar import EvaluationBar
 from chess_game.gui.move_history import MoveHistory
 from chess_game.gui.review_binding import ReviewPanelBinding
+from chess_game.gui.theme import load_stylesheet
 from chess_game.review.annotations import ReviewAnnotator
 from chess_game.review.coach import BotPersonalityService, CoachService
 from chess_game.review.controller import AnalysisController
@@ -98,6 +100,19 @@ REVIEW_MARKERS = {
     'miss': 'x',
     'blunder': '??',
     'pending': '',
+}
+REVIEW_CATEGORY_STYLE = {
+    'brilliant': {'label': 'Brilliant', 'marker': '!!', 'color': '#20bfa9', 'tip': 'Exceptional move that usually includes a sacrifice or tactical resource.'},
+    'great': {'label': 'Great', 'marker': '!', 'color': '#4d9de0', 'tip': 'A strong move that may be the only clear way to keep the advantage.'},
+    'book': {'label': 'Book', 'marker': 'Book', 'color': '#c98b55', 'tip': 'Known opening or repertoire move.'},
+    'best': {'label': 'Best', 'marker': '*', 'color': '#79b84a', 'tip': 'Stockfish top choice.'},
+    'excellent': {'label': 'Excellent', 'marker': '+', 'color': '#6fbf73', 'tip': 'One of Stockfish top candidate moves.'},
+    'good': {'label': 'Good', 'marker': 'OK', 'color': '#8aa678', 'tip': 'Playable move that keeps the position healthy.'},
+    'inaccuracy': {'label': 'Inaccuracy', 'marker': '?!', 'color': '#d6a63f', 'tip': 'A small evaluation loss or missed improvement.'},
+    'mistake': {'label': 'Mistake', 'marker': '?', 'color': '#d9823f', 'tip': 'A meaningful worsening of the position.'},
+    'miss': {'label': 'Miss', 'marker': 'X', 'color': '#d85d55', 'tip': 'Missed a tactic, capture, or mate opportunity.'},
+    'blunder': {'label': 'Blunder', 'marker': '??', 'color': '#d34035', 'tip': 'A serious tactical or material error.'},
+    'pending': {'label': 'Pending', 'marker': '', 'color': '#8d9a84', 'tip': 'Waiting for analysis.'},
 }
 
 
@@ -237,9 +252,7 @@ class MainWindow(QMainWindow):
         self._shallow_analysis_timer.timeout.connect(lambda: self._request_active_analysis(self.analysis_time_seconds))
         self._deep_analysis_timer.timeout.connect(lambda: self._request_active_analysis(self.deep_analysis_time_seconds))
 
-        style_path = Path(__file__).resolve().parents[1] / 'resources' / 'styles.qss'
-        if style_path.exists():
-            self.setStyleSheet(style_path.read_text(encoding='utf-8'))
+        self.setStyleSheet(load_stylesheet('light'))
 
     def _build_start_page(self) -> QWidget:
         page = QWidget()
@@ -261,10 +274,10 @@ class MainWindow(QMainWindow):
         menu_layout.addWidget(player)
         menu_layout.addSpacing(18)
 
-        self.menu_play_tab = self._menu_button('Play', 'Quick start and opponents')
-        self.learn_button = self._menu_button('Learn', 'Coach, lessons, training')
-        self.analysis_menu_button = self._menu_button('Analysis', 'PGN and review tools')
-        self.settings_menu_button = self._menu_button('Settings', 'Board and engine options')
+        self.menu_play_tab = self._menu_button('Play', 'Quick start and opponents', 'play')
+        self.learn_button = self._menu_button('Learn', 'Coach, lessons, training', 'learn')
+        self.analysis_menu_button = self._menu_button('Analysis', 'PGN and review tools', 'analysis')
+        self.settings_menu_button = self._menu_button('Settings', 'Board and engine options', 'settings')
         for button in (self.menu_play_tab, self.learn_button, self.analysis_menu_button, self.settings_menu_button):
             button.setMinimumSize(260, 70)
             menu_layout.addWidget(button)
@@ -282,54 +295,54 @@ class MainWindow(QMainWindow):
         context_layout.addWidget(self.start_context_stack, 1)
 
         play_page = QWidget()
-        play_layout = QVBoxLayout(play_page)
+        play_layout = QGridLayout(play_page)
         play_layout.setContentsMargins(0, 0, 0, 0)
-        play_layout.setSpacing(12)
-        self.quick_play_button = self._context_card('Play 10 min', 'Start the last played time control.')
-        self.new_game_button = self._context_card('New Game', 'Choose friend or bot.')
-        self.play_bots_button = self._context_card('Play Bots', 'Pick an opponent and side.')
-        self.play_friend_button = self._context_card('Play a Friend', 'Local same-device game.')
-        for button in (self.quick_play_button, self.new_game_button, self.play_bots_button, self.play_friend_button):
-            play_layout.addWidget(button)
-        play_layout.addStretch(1)
+        play_layout.setSpacing(14)
+        self.quick_play_button = self._context_card('Continue 10 min', 'Resume your usual rapid setup.', 'play')
+        self.new_game_button = self._context_card('New Game', 'Choose a friend or bot.', 'new')
+        self.play_bots_button = self._context_card('Play Bots', 'Pick a personality and side.', 'bots')
+        self.play_friend_button = self._context_card('Play a Friend', 'Local same-device game.', 'friend')
+        for index, button in enumerate((self.quick_play_button, self.new_game_button, self.play_bots_button, self.play_friend_button)):
+            play_layout.addWidget(button, index // 2, index % 2)
+        play_layout.setRowStretch(2, 1)
 
         learn_page = QWidget()
-        learn_layout = QVBoxLayout(learn_page)
+        learn_layout = QGridLayout(learn_page)
         learn_layout.setContentsMargins(0, 0, 0, 0)
-        learn_layout.setSpacing(12)
-        self.play_coach_home_button = self._context_card('Play Coach', 'Teaching opponent with guided comments.')
-        self.lessons_home_button = self._context_card('Lessons', 'Coming soon.')
-        self.training_home_button = self._context_card('Training', 'Coming soon.')
+        learn_layout.setSpacing(14)
+        self.play_coach_home_button = self._context_card('Play Coach', 'Guided comments while you play.', 'coach')
+        self.lessons_home_button = self._context_card('Lessons', 'Structured lessons coming soon.', 'learn')
+        self.training_home_button = self._context_card('Training', 'Drills and practice coming soon.', 'training')
         self.lessons_home_button.setEnabled(False)
         self.training_home_button.setEnabled(False)
-        for button in (self.play_coach_home_button, self.lessons_home_button, self.training_home_button):
-            learn_layout.addWidget(button)
-        learn_layout.addStretch(1)
+        for index, button in enumerate((self.play_coach_home_button, self.lessons_home_button, self.training_home_button)):
+            learn_layout.addWidget(button, index // 2, index % 2)
+        learn_layout.setRowStretch(2, 1)
 
         analysis_page = QWidget()
-        analysis_layout = QVBoxLayout(analysis_page)
+        analysis_layout = QGridLayout(analysis_page)
         analysis_layout.setContentsMargins(0, 0, 0, 0)
-        analysis_layout.setSpacing(12)
-        self.upload_pgn_button = self._context_card('Upload PGN', 'Import a game for analysis.')
-        self.review_from_menu_button = self._context_card('Review Finished Game', 'Open review for the latest finished game.')
-        self.free_analysis_button = self._context_card('Free Analysis Board', 'Coming soon.')
+        analysis_layout.setSpacing(14)
+        self.upload_pgn_button = self._context_card('Upload PGN', 'Import and review a game.', 'upload')
+        self.review_from_menu_button = self._context_card('Review Last Game', 'Open the latest finished review.', 'review')
+        self.free_analysis_button = self._context_card('Analysis Board', 'Free analysis coming soon.', 'analysis')
         self.review_from_menu_button.setVisible(False)
         self.free_analysis_button.setEnabled(False)
-        for button in (self.upload_pgn_button, self.review_from_menu_button, self.free_analysis_button):
-            analysis_layout.addWidget(button)
-        analysis_layout.addStretch(1)
+        for index, button in enumerate((self.upload_pgn_button, self.review_from_menu_button, self.free_analysis_button)):
+            analysis_layout.addWidget(button, index // 2, index % 2)
+        analysis_layout.setRowStretch(2, 1)
 
         settings_page = QWidget()
-        settings_layout = QVBoxLayout(settings_page)
+        settings_layout = QGridLayout(settings_page)
         settings_layout.setContentsMargins(0, 0, 0, 0)
-        settings_layout.setSpacing(12)
-        self.board_settings_button = self._context_card('Board Settings', 'Coordinates, overlays, and move hints.')
-        self.engine_settings_home_button = self._context_card('Engine Settings', 'Stockfish time, lines, and cloud toggle.')
-        self.sound_settings_button = self._context_card('Sound Settings', 'Coming soon.')
+        settings_layout.setSpacing(14)
+        self.board_settings_button = self._context_card('Board Settings', 'Coordinates, overlays, hints.', 'board')
+        self.engine_settings_home_button = self._context_card('Engine Settings', 'Stockfish time and lines.', 'engine')
+        self.sound_settings_button = self._context_card('Sound Settings', 'Sound controls coming soon.', 'sound')
         self.sound_settings_button.setEnabled(False)
-        for button in (self.board_settings_button, self.engine_settings_home_button, self.sound_settings_button):
-            settings_layout.addWidget(button)
-        settings_layout.addStretch(1)
+        for index, button in enumerate((self.board_settings_button, self.engine_settings_home_button, self.sound_settings_button)):
+            settings_layout.addWidget(button, index // 2, index % 2)
+        settings_layout.setRowStretch(2, 1)
 
         for page_widget in (play_page, learn_page, analysis_page, settings_page):
             self.start_context_stack.addWidget(page_widget)
@@ -338,10 +351,12 @@ class MainWindow(QMainWindow):
         layout.addWidget(context, 1)
         return page
 
-    def _context_card(self, title: str, subtitle: str) -> QPushButton:
+    def _context_card(self, title: str, subtitle: str, icon_key: str = 'play') -> QPushButton:
         button = QPushButton(f'{title}\n{subtitle}')
         button.setObjectName('ContextCard')
-        button.setMinimumHeight(84)
+        button.setIcon(self._app_icon(icon_key))
+        button.setIconSize(QSize(34, 34))
+        button.setMinimumSize(250, 128)
         return button
 
     def _build_learn_page(self) -> QWidget:
@@ -429,9 +444,34 @@ class MainWindow(QMainWindow):
         self._select_coach(COACH_PROFILES[1])
         return page
 
-    def _menu_button(self, title: str, subtitle: str) -> QPushButton:
+    def _app_icon(self, key: str) -> QIcon:
+        icons = {
+            'play': QStyle.StandardPixmap.SP_MediaPlay,
+            'new': QStyle.StandardPixmap.SP_FileIcon,
+            'bots': QStyle.StandardPixmap.SP_ComputerIcon,
+            'friend': QStyle.StandardPixmap.SP_DirHomeIcon,
+            'learn': QStyle.StandardPixmap.SP_DialogHelpButton,
+            'coach': QStyle.StandardPixmap.SP_MessageBoxInformation,
+            'training': QStyle.StandardPixmap.SP_BrowserReload,
+            'analysis': QStyle.StandardPixmap.SP_FileDialogDetailedView,
+            'upload': QStyle.StandardPixmap.SP_ArrowUp,
+            'review': QStyle.StandardPixmap.SP_FileDialogContentsView,
+            'settings': QStyle.StandardPixmap.SP_FileDialogInfoView,
+            'board': QStyle.StandardPixmap.SP_FileDialogListView,
+            'engine': QStyle.StandardPixmap.SP_DriveHDIcon,
+            'sound': QStyle.StandardPixmap.SP_MediaVolume,
+            'first': QStyle.StandardPixmap.SP_MediaSkipBackward,
+            'prev': QStyle.StandardPixmap.SP_MediaSeekBackward,
+            'next': QStyle.StandardPixmap.SP_MediaSeekForward,
+            'final': QStyle.StandardPixmap.SP_MediaSkipForward,
+        }
+        return self.style().standardIcon(icons.get(key, QStyle.StandardPixmap.SP_FileIcon))
+
+    def _menu_button(self, title: str, subtitle: str, icon_key: str = 'play') -> QPushButton:
         button = QPushButton(f'{title}\n{subtitle}')
         button.setObjectName('MenuButton')
+        button.setIcon(self._app_icon(icon_key))
+        button.setIconSize(QSize(30, 30))
         button.setMinimumSize(300, 76)
         return button
 
@@ -566,64 +606,72 @@ class MainWindow(QMainWindow):
         return panel
 
     def _bot_card(self, bot: dict) -> QPushButton:
-        button = QPushButton(f"{bot['name']}  {rating_label(bot)}\n{bot['dialogue']}")
+        description = str(bot.get('description') or bot.get('dialogue', 'Ready to play.'))
+        button = QPushButton(f"{bot['name']}\n{rating_label(bot)} - {bot['group']}\n{self._compact_card_text(description)}")
         button.setObjectName('BotCardButton')
-        avatar = self._bot_avatar(bot)
+        button.setToolTip(description)
+        avatar = self._bot_avatar(bot, 72)
         button.setIcon(QIcon(avatar))
         button.setIconSize(avatar.size())
-        button.setMinimumSize(260, 96)
+        button.setMinimumSize(280, 132)
         button.clicked.connect(lambda _checked=False, value=bot: self._select_bot(value))
         return button
 
     def _select_bot(self, bot: dict) -> None:
         self.selected_bot_profile = bot
-        self.selected_bot_icon.setPixmap(self._bot_avatar(bot))
+        self.selected_bot_icon.setPixmap(self._bot_avatar(bot, 76))
         self.selected_bot_name.setText(f"{bot['name']}  {rating_label(bot)}")
-        self.selected_bot_dialogue.setText(str(bot['dialogue']))
+        self.selected_bot_dialogue.setText(str(bot.get('description') or bot['dialogue']))
 
     def _coach_card(self, coach: dict) -> QPushButton:
-        button = QPushButton(f"{coach['name']}  {rating_label(coach)}\n{coach['description']}")
+        button = QPushButton(f"{coach['name']}\n{rating_label(coach)} - Coach\n{self._compact_card_text(str(coach['description']))}")
         button.setObjectName('BotCardButton')
-        avatar = self._bot_avatar(coach)
+        button.setToolTip(str(coach['description']))
+        avatar = self._bot_avatar(coach, 72)
         button.setIcon(QIcon(avatar))
         button.setIconSize(avatar.size())
-        button.setMinimumSize(260, 112)
+        button.setMinimumSize(300, 142)
         button.clicked.connect(lambda _checked=False, value=coach: self._select_coach(value))
         return button
 
     def _select_coach(self, coach: dict) -> None:
         self.coach_profile = coach
-        self.selected_coach_icon.setPixmap(self._bot_avatar(coach))
+        self.selected_coach_icon.setPixmap(self._bot_avatar(coach, 76))
         self.selected_coach_name.setText(f"{coach['name']}  {rating_label(coach)}")
         self.selected_coach_dialogue.setText(str(coach['description']))
 
-    def _bot_avatar(self, bot: dict) -> QPixmap:
+    def _compact_card_text(self, text: str, limit: int = 58) -> str:
+        compact = ' '.join(str(text).split())
+        return compact if len(compact) <= limit else compact[: limit - 1].rstrip() + '...'
+
+    def _bot_avatar(self, bot: dict, size: int = 56) -> QPixmap:
         avatar_path = Path(str(bot.get('avatar_path', '')))
         if avatar_path.exists():
-            pixmap = QIcon(str(avatar_path)).pixmap(56, 56)
+            pixmap = QIcon(str(avatar_path)).pixmap(size, size)
             if not pixmap.isNull():
                 return pixmap
-        pixmap = QPixmap(56, 56)
+        pixmap = QPixmap(size, size)
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setBrush(QColor(str(bot['color'])))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(4, 4, 48, 48, 12, 12)
+        scale = size / 56
+        painter.drawRoundedRect(int(4 * scale), int(4 * scale), int(48 * scale), int(48 * scale), int(12 * scale), int(12 * scale))
         painter.setBrush(QColor('#fff8ee'))
-        painter.drawEllipse(18, 10, 20, 20)
+        painter.drawEllipse(int(18 * scale), int(10 * scale), int(20 * scale), int(20 * scale))
         painter.setBrush(QColor('#263126'))
-        painter.drawEllipse(23, 18, 3, 3)
-        painter.drawEllipse(31, 18, 3, 3)
+        painter.drawEllipse(int(23 * scale), int(18 * scale), max(2, int(3 * scale)), max(2, int(3 * scale)))
+        painter.drawEllipse(int(31 * scale), int(18 * scale), max(2, int(3 * scale)), max(2, int(3 * scale)))
         painter.setBrush(QColor('#5b4636'))
-        painter.drawRoundedRect(15, 30, 26, 20, 8, 8)
+        painter.drawRoundedRect(int(15 * scale), int(30 * scale), int(26 * scale), int(20 * scale), int(8 * scale), int(8 * scale))
         painter.setPen(QColor('#ffffff'))
         font = QFont('Segoe UI')
-        font.setPixelSize(13)
+        font.setPixelSize(max(13, int(13 * scale)))
         font.setBold(True)
         painter.setFont(font)
         initials = ''.join(part[0] for part in str(bot['name']).split()[:2])
-        painter.drawText(pixmap.rect().adjusted(0, 33, 0, 0), Qt.AlignmentFlag.AlignCenter, initials)
+        painter.drawText(pixmap.rect().adjusted(0, int(33 * scale), 0, 0), Qt.AlignmentFlag.AlignCenter, initials)
         painter.end()
         return pixmap
 
@@ -710,6 +758,16 @@ class MainWindow(QMainWindow):
         self.game_settings_button.setObjectName('ActionButton')
         self.menu_button = QPushButton('Menu')
         self.menu_button.setObjectName('ActionButton')
+        for button, icon_key in (
+            (self.resign_button, 'review'),
+            (self.hint_button, 'learn'),
+            (self.undo_button, 'prev'),
+            (self.review_button, 'analysis'),
+            (self.game_settings_button, 'settings'),
+            (self.menu_button, 'board'),
+        ):
+            button.setIcon(self._app_icon(icon_key))
+            button.setIconSize(QSize(20, 20))
 
         action_row = QHBoxLayout()
         action_row.setSpacing(10)
@@ -900,12 +958,20 @@ class MainWindow(QMainWindow):
 
         review_nav = QHBoxLayout()
         review_nav.setSpacing(10)
-        self.review_first_button = QPushButton('|<')
-        self.review_prev_button = QPushButton('<')
-        self.review_next_button = QPushButton('>')
-        self.review_final_button = QPushButton('>|')
-        for button in (self.review_first_button, self.review_prev_button, self.review_next_button, self.review_final_button):
+        self.review_first_button = QPushButton('')
+        self.review_prev_button = QPushButton('')
+        self.review_next_button = QPushButton('')
+        self.review_final_button = QPushButton('')
+        for button, icon_key, tip in (
+            (self.review_first_button, 'first', 'First move'),
+            (self.review_prev_button, 'prev', 'Previous move'),
+            (self.review_next_button, 'next', 'Next move'),
+            (self.review_final_button, 'final', 'Final move'),
+        ):
             button.setObjectName('ReviewNavButton')
+            button.setIcon(self._app_icon(icon_key))
+            button.setIconSize(QSize(24, 24))
+            button.setToolTip(tip)
             review_nav.addWidget(button)
         right_layout.addLayout(review_nav)
         self.review_side_stack.addWidget(summary_page)
@@ -2189,9 +2255,9 @@ class MainWindow(QMainWindow):
         for category in categories:
             self._set_review_summary_row(
                 row,
-                category.title(),
+                REVIEW_CATEGORY_STYLE[category]['label'],
                 str(stats[chess.WHITE][category]),
-                REVIEW_MARKERS[category],
+                REVIEW_CATEGORY_STYLE[category]['marker'],
                 str(stats[chess.BLACK][category]),
             )
             row += 1
@@ -2206,17 +2272,20 @@ class MainWindow(QMainWindow):
             label = self._review_move_list_label(item)
             move_item = QTableWidgetItem(label)
             move_item.setData(Qt.ItemDataRole.UserRole, item)
+            self._style_review_item(move_item, item['category'])
             self.review_moves_table.setItem(row, column, move_item)
-            eval_item = QTableWidgetItem(f"{item['category'].title()} ({self._delta_text(self._move_eval_delta(item))})")
+            style = REVIEW_CATEGORY_STYLE.get(item['category'], REVIEW_CATEGORY_STYLE['pending'])
+            eval_item = QTableWidgetItem(f"{style['label']} {self._delta_text(self._move_eval_delta(item))}")
             eval_item.setData(Qt.ItemDataRole.UserRole, item)
+            self._style_review_item(eval_item, item['category'])
             self.review_moves_table.setItem(row, 3, eval_item)
         self._append_variation_rows(move_count)
 
     def _review_move_list_label(self, item: dict) -> str:
         move_no = (int(item['index']) + 1) // 2
         prefix = f'{move_no}.' if item['side'] == chess.WHITE else f'{move_no}...'
-        marker = REVIEW_MARKERS.get(item['category'], '')
-        return f"{prefix} {item['san']} {marker} ({self._delta_text(self._move_eval_delta(item))})"
+        style = REVIEW_CATEGORY_STYLE.get(item['category'], REVIEW_CATEGORY_STYLE['pending'])
+        return f"{prefix} {item['san']}  {style['marker']}  {self._delta_text(self._move_eval_delta(item))}"
 
     def _move_eval_delta(self, item: dict) -> float:
         annotation = self.review_annotations.get(int(item.get('index', 0)))
@@ -2319,9 +2388,11 @@ class MainWindow(QMainWindow):
             self.review_moves_table.setItem(row, 0, number_item)
             move_item = QTableWidgetItem(row_data['move'])
             move_item.setData(Qt.ItemDataRole.UserRole, item_data)
+            self._style_review_item(move_item, item_data['category'])
             self.review_moves_table.setItem(row, 1 if node and node.color == chess.WHITE else 2, move_item)
             kind_item = QTableWidgetItem(row_data['kind'])
             kind_item.setData(Qt.ItemDataRole.UserRole, item_data)
+            self._style_review_item(kind_item, item_data['category'])
             self.review_moves_table.setItem(row, 3, kind_item)
 
     def _set_review_card(self, card: QFrame, title: str, value: str, caption: str) -> None:
@@ -2578,13 +2649,24 @@ class MainWindow(QMainWindow):
         self.review_bot_captures_label.setText(f'{bot_pieces}{bot_plus}'.strip())
 
     def _set_review_summary_row(self, row: int, label: str, player: str, marker: str, bot: str) -> None:
+        category = REVIEW_CATEGORIES_FULL[row] if row < len(REVIEW_CATEGORIES_FULL) else 'pending'
         values = (label, str(player), marker, str(bot))
         for column, value in enumerate(values):
             item = QTableWidgetItem(value)
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter if column else Qt.AlignmentFlag.AlignLeft)
+            self._style_review_item(item, category)
             if column == 0:
                 item.setData(Qt.ItemDataRole.UserRole, label.lower())
             self.review_summary_table.setItem(row, column, item)
+
+    def _style_review_item(self, item: QTableWidgetItem, category: str) -> None:
+        style = REVIEW_CATEGORY_STYLE.get(category, REVIEW_CATEGORY_STYLE['pending'])
+        color = QColor(str(style['color']))
+        background = QColor(color)
+        background.setAlpha(34)
+        item.setBackground(QBrush(background))
+        item.setForeground(QBrush(QColor('#263929')))
+        item.setToolTip(str(style['tip']))
 
     def _accuracy_for(self, stats: dict) -> str:
         if stats['analysed_moves'] == 0 or stats['weight'] <= 0:

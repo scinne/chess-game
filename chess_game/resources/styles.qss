@@ -521,3 +521,157 @@ QStatusBar {
 QSplitter::handle {
     background: #d5dec8;
 }
+
+/* Modern platform pass: keep chessboard untouched, soften app chrome. */
+#StartPage,
+#ReviewPage {
+    background: #eef4e7;
+}
+
+#MainMenuPanel,
+#StartSide,
+#SelectedBotPanel,
+#BotGroupPanel,
+#SideChoicePanel,
+#ReviewSide,
+#ReviewCoachPanel,
+#SettingsDialog {
+    background: #fbfdf6;
+    border: 1px solid rgba(121, 148, 102, 0.22);
+    border-radius: 16px;
+}
+
+#MainMenuPanel {
+    min-width: 300px;
+    max-width: 380px;
+}
+
+#MenuTitle {
+    font-size: 38px;
+    letter-spacing: 0;
+}
+
+#PanelHeader {
+    border: none;
+    background: transparent;
+    padding: 4px 2px 10px 2px;
+    font-size: 24px;
+}
+
+#MenuButton {
+    min-height: 78px;
+    background: #ffffff;
+    border: 1px solid rgba(121, 148, 102, 0.22);
+    border-radius: 14px;
+    padding: 14px 18px;
+}
+
+#MenuButton:hover,
+#ContextCard:hover,
+#BotCardButton:hover,
+#ReviewNavButton:hover,
+#ActionButton:hover,
+#GhostButton:hover {
+    background: #edf7e5;
+    border-color: #83ad63;
+}
+
+#ContextCard {
+    background: #ffffff;
+    border: 1px solid rgba(121, 148, 102, 0.22);
+    border-radius: 16px;
+    padding: 18px;
+    font-size: 16px;
+    font-weight: 850;
+    text-align: left;
+}
+
+#ContextCard:pressed,
+#MenuButton:pressed,
+#BotCardButton:pressed,
+#ReviewNavButton:pressed {
+    background: #dcebcf;
+}
+
+#BotCardButton {
+    background: #ffffff;
+    border: 1px solid rgba(121, 148, 102, 0.22);
+    border-radius: 16px;
+    padding: 14px;
+    text-align: left;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+#SelectedBotPanel {
+    background: #ffffff;
+}
+
+#GameDialogueBubble,
+#CoachComment {
+    background: #ffffff;
+    border: 1px solid rgba(121, 148, 102, 0.18);
+    border-radius: 14px;
+    padding: 10px 14px;
+}
+
+#GameStatus,
+#OpeningLabel,
+#PlayerStrip {
+    background: rgba(251, 253, 246, 0.88);
+    border: 1px solid rgba(121, 148, 102, 0.18);
+    border-radius: 12px;
+}
+
+QTableWidget {
+    background: transparent;
+    alternate-background-color: transparent;
+    border: none;
+    gridline-color: transparent;
+    selection-background-color: #dcebcf;
+}
+
+QHeaderView::section {
+    background: transparent;
+    border: none;
+    color: #64725f;
+    padding: 8px 10px;
+}
+
+QTableWidget::item {
+    border: 2px solid transparent;
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+
+QTableWidget::item:selected {
+    background: #dcebcf;
+    color: #243126;
+}
+
+#ReviewLinesTable,
+#ReviewMovesTable,
+#ReviewSummaryTable {
+    background: #fbfdf6;
+    border: 1px solid rgba(121, 148, 102, 0.16);
+    border-radius: 14px;
+}
+
+#ReviewStatCard {
+    background: #ffffff;
+    border: 1px solid rgba(121, 148, 102, 0.18);
+    border-radius: 14px;
+}
+
+#ReviewNavButton {
+    min-height: 48px;
+    background: #ffffff;
+    border: 1px solid rgba(121, 148, 102, 0.22);
+    border-radius: 14px;
+}
+
+#ActionButton,
+#StartAction,
+#ReviewTopButton {
+    border-radius: 13px;
+}
