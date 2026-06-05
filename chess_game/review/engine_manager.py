@@ -6,7 +6,7 @@ import logging
 import time
 
 import chess
-from PyQt6.QtCore import QObject, QThread, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal, pyqtSlot
 
 from chess_game.engine import StockfishEngine
 from chess_game.review.models import AnalysisResult, CandidateLine
@@ -157,26 +157,27 @@ class StockfishAnalysisManager(QObject):
         if self.stockfish_path:
             self._start_worker()
 
-    def analyze(self, fen: str, lines: int = 3, time_seconds: float = 0.5, threads: int = 2) -> None:
+    def analyze(self, fen: str, lines: int = 3, time_seconds: float = 0.5, threads: int = 2) -> int | None:
         if not self.stockfish_path:
             self.analysis_failed.emit('Stockfish unavailable')
-            return
+            return None
         try:
             fen = chess.Board(fen).fen()
         except Exception as exc:  # noqa: BLE001
             self.analysis_failed.emit(f'Invalid FEN: {exc}')
-            return
+            return None
         self._current_fen = fen
         self._request_id += 1
         cache_key = (fen, max(1, lines))
         if cache_key in self._cache:
             cached = self._cache[cache_key]
             cached.request_id = self._request_id
-            self._emit_ready(cached)
-            return
+            QTimer.singleShot(0, lambda result=cached: self._emit_ready(result))
+            return self._request_id
         if self._thread is None or self._worker is None:
             self._start_worker()
         self._request_analysis.emit(self._request_id, fen, max(1, lines), max(0.05, time_seconds), max(1, threads))
+        return self._request_id
 
     def stop(self, wait_ms: int = 25) -> None:
         self._request_id += 1

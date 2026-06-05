@@ -176,6 +176,7 @@ class MainWindow(QMainWindow):
         self._hint_stage = 0
         self._analysis_enabled = False
         self._active_analysis_fen: str | None = None
+        self._live_eval_request_id: int | None = None
         self._shallow_analysis_timer = QTimer(self)
         self._shallow_analysis_timer.setSingleShot(True)
         self._deep_analysis_timer = QTimer(self)
@@ -1218,6 +1219,13 @@ class MainWindow(QMainWindow):
         self.board_widget.set_show_move_quality_icons(settings.show_move_quality_icons)
         self.review_board_widget.set_show_move_quality_icons(settings.show_move_quality_icons)
         self.board_widget.set_show_coordinates(settings.show_coordinates)
+        if self.stack.currentWidget() == self.game_page:
+            self._active_analysis_fen = None
+            self._live_eval_request_id = None
+            if settings.enable_stockfish_analysis:
+                self._schedule_active_analysis(shallow_delay=0)
+            elif settings.show_eval_bar:
+                self.eval_bar.set_evaluation(self._material_eval(self.board))
         self.review_board_widget.set_show_coordinates(settings.show_coordinates)
         self.review_coach_label.setVisible(True)
 
@@ -1424,7 +1432,7 @@ class MainWindow(QMainWindow):
             self._sync_board_state()
             self._update_game_dialogue_for_move(move)
 
-        self._schedule_active_analysis()
+        self._schedule_active_analysis(shallow_delay=0)
 
         if self.board.is_checkmate() or self.board.is_stalemate():
             self._finish_game_status()
@@ -1483,20 +1491,28 @@ class MainWindow(QMainWindow):
 
     def _refresh_eval(self) -> None:
         if self.settings_manager.settings.show_eval_bar:
-            self.eval_bar.set_evaluation(self._material_eval(self.board))
+            self._schedule_active_analysis(shallow_delay=0)
 
     def _schedule_active_analysis(self, shallow_delay: int = 80) -> None:
         if (
             not self.active_analysis
             or self._game_over
-            or self.stack.currentWidget() != self.review_page
-            or not self.settings_manager.settings.enable_stockfish_analysis
+            or self.stack.currentWidget() != self.game_page
         ):
             return
         fen = self.board.fen()
         if fen == self._active_analysis_fen:
             return
         self._active_analysis_fen = fen
+        self._live_eval_request_id = None
+        if not self.settings_manager.settings.enable_stockfish_analysis:
+            if self.settings_manager.settings.show_eval_bar:
+                self.eval_bar.set_result(None)
+                self.eval_bar.set_evaluation(self._material_eval(self.board))
+            return
+        if self.settings_manager.settings.show_eval_bar:
+            self.eval_bar.set_result(None)
+            self.eval_bar.set_loading(self._material_eval(self.board))
         self._shallow_analysis_timer.start(shallow_delay)
         self._deep_analysis_timer.start(650)
 
@@ -1505,12 +1521,14 @@ class MainWindow(QMainWindow):
             return
         if self.stack.currentWidget() != self.game_page or not self._active_analysis_fen:
             return
-        self.active_analysis.analyze(
+        request_id = self.active_analysis.analyze(
             self._active_analysis_fen,
-            lines=self.analysis_line_count,
+            lines=1,
             time_seconds=time_seconds,
             threads=self.analysis_threads,
         )
+        if request_id is not None:
+            self._live_eval_request_id = request_id
 
     def _top_moves_for_board(self, board: chess.Board, n: int = 3, analysis_time: float | None = None) -> list[dict]:
         if not self.analysis_engine or not self.settings_manager.settings.enable_stockfish_analysis:
@@ -1565,7 +1583,7 @@ class MainWindow(QMainWindow):
             self.opening_label.setText(f"Opening: {opening.get('name', 'Game in progress')}")
         else:
             self.opening_label.setText('Opening: Starting position')
-        self._schedule_active_analysis()
+        self._schedule_active_analysis(shallow_delay=0)
         LOGGER.info('Board redraw cost %.1f ms', (time.perf_counter() - start) * 1000)
 
     def _captured_by(self, capturer_color: chess.Color) -> tuple[str, int]:
@@ -1590,6 +1608,12 @@ class MainWindow(QMainWindow):
 
     def _finish_game_status(self) -> None:
         self._game_over = True
+        self._active_analysis_fen = None
+        self._live_eval_request_id = None
+        self._shallow_analysis_timer.stop()
+        self._deep_analysis_timer.stop()
+        if self.analysis_controller:
+            self.analysis_controller.stop()
         self._set_review_available(True)
         if self.board.is_checkmate():
             winner_color = not self.board.turn
@@ -2488,7 +2512,14 @@ class MainWindow(QMainWindow):
 
     def _on_active_analysis_ready(self, result: AnalysisResult) -> None:
         if self.stack.currentWidget() == self.game_page:
-            if result.fen != self.board.fen():
+            if self._game_over:
+                return
+            current_fen = self.board.fen()
+            if (
+                result.fen != current_fen
+                or result.fen != self._active_analysis_fen
+                or result.request_id != self._live_eval_request_id
+            ):
                 return
             start = time.perf_counter()
             self.eval_bar.set_evaluation({'score_type': result.score_type, 'score_value': result.score_value, 'value': result.score_value})
@@ -2516,6 +2547,13 @@ class MainWindow(QMainWindow):
             self._show_review_position(item, analyze=False)
 
     def _on_active_analysis_failed(self, message: str) -> None:
+        if self.stack.currentWidget() == self.game_page:
+            self._active_analysis_fen = None
+            self._live_eval_request_id = None
+            if self.settings_manager.settings.show_eval_bar:
+                self.eval_bar.set_evaluation(self._material_eval(self.board))
+            LOGGER.warning('Live Stockfish eval unavailable: %s', message)
+            return
         if self.review_binding:
             self.review_binding.show_waiting(f'Analysis unavailable: {message}')
 
@@ -2712,6 +2750,10 @@ class MainWindow(QMainWindow):
     def _new_game(self) -> None:
         self.board = ChessBoard()
         self._game_over = False
+        self._active_analysis_fen = None
+        self._live_eval_request_id = None
+        self._shallow_analysis_timer.stop()
+        self._deep_analysis_timer.stop()
         self._set_review_available(False)
         self._thinking = False
         self._hint_stage = 0

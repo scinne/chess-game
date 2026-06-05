@@ -18,6 +18,7 @@ class EvaluationBar(QWidget):
         self._eval = 0.0
         self._label = '0'
         self._result_label: str | None = None
+        self._loading = False
         self._animation = QVariantAnimation(self)
         self._animation.setDuration(180)
         self._animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
@@ -30,6 +31,7 @@ class EvaluationBar(QWidget):
     def set_evaluation(self, evaluation: int | float | dict) -> None:
         """Set evaluation value and animate bar update."""
         self._result_label = None
+        self._loading = False
         if isinstance(evaluation, dict) and evaluation.get('type') == 'mate':
             mate = int(evaluation.get('value', 0))
             target = 1000.0 if mate > 0 else -1000.0
@@ -48,9 +50,20 @@ class EvaluationBar(QWidget):
         self._animation.setEndValue(target)
         self._animation.start()
 
+    def set_loading(self, fallback: int | float | dict | None = None) -> None:
+        """Mark the current value as provisional while engine analysis runs."""
+        self._result_label = None
+        self._loading = True
+        if fallback is not None:
+            self.set_evaluation(fallback)
+            self._loading = True
+        else:
+            self.update()
+
     def set_result(self, result: str | None) -> None:
         """Show a game result instead of the numeric evaluation label."""
         self._result_label = result
+        self._loading = False
         self.update()
 
     def _compact_label(self, evaluation: int | float | dict, target: float) -> str:
@@ -83,7 +96,7 @@ class EvaluationBar(QWidget):
         painter.drawRoundedRect(rect, 6, 6)
 
         white_rect = rect.adjusted(0, black_height, 0, 0)
-        painter.setBrush(QColor(245, 245, 245))
+        painter.setBrush(QColor(245, 245, 245, 185 if self._loading else 255))
         painter.drawRoundedRect(white_rect, 6, 6)
 
         label = self._result_label or self._label
